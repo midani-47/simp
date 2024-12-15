@@ -1,0 +1,14 @@
+Current state summary:
+1.Client-to-Daemon Communication:
+. Clients can connect to their respective daemons and send commands (connect, chat, quit).
+. Clients are properly receiving responses from their daemon.
+2. Daemon-to-Daemon Communication:
+The implementation for initiating a three-way handshake (SYN, SYN+ACK, ACK) is in place but requires verification and testing.
+Currently, the daemon correctly identifies when a client attempts to chat with itself.
+
+
+Next Steps:
+1.Add logging to every critical point of the handshake.
+2.Run two daemons locally to verify communication.
+3.Validate datagram serialization and deserialization.
+4.Adjust timeouts for debugging.

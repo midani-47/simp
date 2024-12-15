@@ -1,0 +1,72 @@
+2024-12-15 12:20:53,913 - INFO - [0b8adde6] Registered user: dimos with IP 127.0.0.1
+2024-12-15 12:20:53,913 - INFO - [0b8adde6] Daemon starting on 127.0.0.1
+2024-12-15 12:22:02,385 - INFO - [2d6eef62] Registered user: dimos with IP 127.0.0.1
+2024-12-15 12:22:02,385 - INFO - [2d6eef62] Daemon starting on 127.0.0.1
+2024-12-15 12:22:02,385 - INFO - [2d6eef62] Listening for client requests...
+2024-12-15 12:22:02,385 - INFO - [2d6eef62] Listening for daemon messages...
+2024-12-15 12:22:06,888 - INFO - [2d6eef62] Received client request from ('127.0.0.1', 57037): connect
+2024-12-15 12:22:13,689 - INFO - [2d6eef62] Received client request from ('127.0.0.1', 57037): chat dimos
+2024-12-15 12:33:30,265 - INFO - [2d6eef62] Shutting down daemon...
+2024-12-15 12:33:31,681 - INFO - [1c30beef] Registered user: dimos with IP 127.0.0.1
+2024-12-15 12:33:31,681 - INFO - [1c30beef] Daemon starting on 127.0.0.1
+2024-12-15 12:33:31,682 - INFO - [1c30beef] Listening for client requests...
+2024-12-15 12:33:31,682 - INFO - [1c30beef] Listening for daemon messages...
+2024-12-15 12:33:36,108 - INFO - [1c30beef] Received client request from ('127.0.0.1', 61629): connect
+2024-12-15 12:33:36,108 - INFO - [1c30beef] Processing command: connect, args: None
+2024-12-15 12:33:53,895 - INFO - [1c30beef] Received client request from ('127.0.0.1', 61629): chat dimos
+2024-12-15 12:33:53,896 - INFO - [1c30beef] Processing command: chat, args: dimos
+2024-12-15 12:33:53,896 - INFO - [1c30beef] Attempting to chat with dimos at 127.0.0.1
+2024-12-15 12:41:53,879 - INFO - [1c30beef] Shutting down daemon...
+2024-12-15 12:41:59,190 - INFO - [2e8aa11b] Registered user: dimos with IP 127.0.0.1
+2024-12-15 12:41:59,190 - INFO - [2e8aa11b] Daemon starting on 127.0.0.1
+2024-12-15 12:41:59,190 - INFO - [2e8aa11b] Listening for client requests...
+2024-12-15 12:43:54,608 - INFO - [2e8aa11b] Shutting down daemon...
+2024-12-15 12:43:55,730 - INFO - [9e0d2190] Registered user: dimos with IP 127.0.0.1
+2024-12-15 12:43:55,730 - INFO - [9e0d2190] Daemon starting on 127.0.0.1
+2024-12-15 12:43:55,730 - INFO - [9e0d2190] Listening for client requests...
+2024-12-15 12:43:55,730 - INFO - [9e0d2190] Daemon socket bound to: ('127.0.0.1', 7777)
+2024-12-15 12:44:00,887 - INFO - [9e0d2190] Received client request from ('127.0.0.1', 52990): connect
+2024-12-15 12:44:00,888 - ERROR - [9e0d2190] Error in handle_client_requests: cannot access local variable 'syn_datagram' where it is not associated with a value
+2024-12-15 12:44:21,787 - INFO - [9e0d2190] Received client request from ('127.0.0.1', 52990): chat dim
+2024-12-15 12:44:21,788 - ERROR - [9e0d2190] Error in handle_client_requests: cannot access local variable 'syn_datagram' where it is not associated with a value
+2024-12-15 12:48:54,334 - INFO - [9e0d2190] Shutting down daemon...
+2024-12-15 13:13:12,641 - INFO - [33a805f7] Registered user: dimos with IP 127.0.0.1
+2024-12-15 13:13:12,641 - INFO - [33a805f7] Daemon starting on 127.0.0.1
+2024-12-15 13:13:12,641 - INFO - [33a805f7] Listening for client requests...
+2024-12-15 13:13:12,641 - INFO - [33a805f7] Daemon socket bound to: ('127.0.0.1', 7777)
+2024-12-15 13:13:16,001 - INFO - [33a805f7] Received client request from ('127.0.0.1', 60306): connect
+2024-12-15 13:13:16,001 - INFO - [33a805f7] Processing command: connect, args: None
+2024-12-15 13:16:36,670 - INFO - [33a805f7] Received client request from ('127.0.0.1', 60306): chat d
+2024-12-15 13:16:36,672 - INFO - [33a805f7] Processing command: chat, args: d
+2024-12-15 13:16:36,672 - WARNING - [33a805f7] Chat request for unknown user: d
+2024-12-15 13:25:15,273 - INFO - [33a805f7] Shutting down daemon...
+2024-12-15 13:25:17,157 - INFO - [31799f62] Registered user: dimos with IP 127.0.0.1
+2024-12-15 13:25:17,157 - INFO - [31799f62] Daemon starting on 127.0.0.1
+2024-12-15 13:25:17,157 - INFO - [31799f62] Listening for client requests...
+2024-12-15 13:25:17,157 - INFO - [31799f62] Daemon socket bound to: ('127.0.0.1', 7777)
+2024-12-15 13:25:22,864 - INFO - [31799f62] Received client request from ('127.0.0.1', 53620): connect
+2024-12-15 13:25:22,864 - INFO - [31799f62] Processing command: connect, args: None
+2024-12-15 13:25:29,279 - INFO - [31799f62] Received client request from ('127.0.0.1', 53620): chat dimos
+2024-12-15 13:25:29,279 - INFO - [31799f62] Processing command: chat, args: dimos
+2024-12-15 13:25:29,279 - INFO - [31799f62] Attempting to chat with dimos at 127.0.0.1
+2024-12-15 13:33:13,573 - INFO - [31799f62] Shutting down daemon...
+2024-12-15 13:33:16,682 - INFO - [5f5846ea] Registered user: dimos with IP 127.0.0.1
+2024-12-15 13:33:16,682 - INFO - [5f5846ea] Daemon starting on 127.0.0.1
+2024-12-15 13:33:16,682 - INFO - [5f5846ea] Listening for client requests...
+2024-12-15 13:33:16,682 - INFO - [5f5846ea] Daemon socket bound to: ('127.0.0.1', 7777)
+2024-12-15 13:33:20,087 - INFO - [5f5846ea] Received client request from ('127.0.0.1', 64934): connect
+2024-12-15 13:33:20,087 - INFO - [5f5846ea] Processing command: connect, args: None
+2024-12-15 13:33:25,849 - INFO - [5f5846ea] Received client request from ('127.0.0.1', 64934): chat dimos
+2024-12-15 13:33:25,849 - INFO - [5f5846ea] Processing command: chat, args: dimos
+2024-12-15 13:33:25,849 - INFO - [5f5846ea] Attempting to chat with dimos at 127.0.0.1
+2024-12-15 13:44:01,575 - INFO - [5f5846ea] Shutting down daemon...
+2024-12-15 13:48:51,427 - INFO - [dec073f3] Registered user: dimos with IP 127.0.0.1
+2024-12-15 13:48:51,427 - INFO - [dec073f3] Daemon starting on 127.0.0.1
+2024-12-15 13:48:51,428 - INFO - [dec073f3] Listening for client requests...
+2024-12-15 13:48:51,428 - INFO - [dec073f3] Daemon socket bound to: ('127.0.0.1', 7777)
+2024-12-15 13:48:55,261 - INFO - [dec073f3] Received client request from ('127.0.0.1', 64197): connect
+2024-12-15 13:48:55,261 - INFO - [dec073f3] Processing command: connect, args: None
+2024-12-15 13:49:02,634 - INFO - [dec073f3] Received client request from ('127.0.0.1', 64197): chat a
+2024-12-15 13:49:02,634 - INFO - [dec073f3] Processing command: chat, args: a
+2024-12-15 13:49:02,634 - WARNING - [dec073f3] Chat request for unknown user: a
+2024-12-15 14:21:41,444 - INFO - [dec073f3] Shutting down daemon...

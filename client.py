@@ -1,66 +1,117 @@
-# client.py
+
+#client.py
 import socket
+import threading
+from utils import SIMPDatagram
 
-DAEMON_IP = "127.0.0.1"
-DAEMON_PORT = 7778  # Daemon's client communication port
+# Client setup
+daemon_address = ('127.0.0.1', 7778)
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+client_socket.bind(('127.0.0.1', 0))  # Bind to a random available port
+client_socket.settimeout(10)  # Increased timeout to 10 seconds
 
 
-class Client:
-    def __init__(self, daemon_ip):
-        self.daemon_ip = daemon_ip
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    def send_request(self, message):
-        """Send a request to the daemon and wait for a response."""
-        try:
-            print(f"Sending message to daemon at {self.daemon_ip}:{DAEMON_PORT}: {message}")
-            self.socket.sendto(message.encode(), (self.daemon_ip, DAEMON_PORT))
-
-            # Set a timeout for recvfrom to avoid blocking indefinitely
-            self.socket.settimeout(3)  # 3-second timeout
-            response, addr = self.socket.recvfrom(1024)  # Receive response
-            print(f"Received response from daemon {addr}: {response.decode()}")
-            return response.decode()
-        except socket.timeout:
-            print("Timeout: No response from daemon")
-            return "Timeout"
-        except Exception as e:
-            print(f"Error during communication with daemon: {e}")
-            return "Error"
-
-    def start(self):
-        """Start the client interface for interacting with the daemon."""
-        print("Connecting to daemon...")
+# Connect to the daemon
+def connect_to_daemon():
+    try:
+        client_socket.sendto("connect".encode(), daemon_address)
+        response, _ = client_socket.recvfrom(1024)
+        response_text = response.decode()
         
-        # Send a simple connect request
-        response = self.send_request("connect")
-        print(f"Daemon response: {response}")
+        if response_text == "USERNAME_REQUEST":
+            username = input("Enter your username: ").strip()
+            client_socket.sendto(username.encode(), daemon_address)
+            
+            # Wait for connection confirmation
+            response, _ = client_socket.recvfrom(1024)
+            print(f"Daemon response: {response.decode()}")
+        else:
+            print(f"Daemon response: {response_text}")
+    except socket.timeout:
+        print("Error: Timeout. No response from daemon.")
 
-        while True:
-            command = input("Enter command (chat, quit): ").strip().lower()
+# Send a chat request
+def chat_with_user():
+    username = input("Enter the username of the user to chat with: ").strip()
+    chat_request = f"chat {username}"
+    try:
+        client_socket.sendto(chat_request.encode(), daemon_address)
+        response, _ = client_socket.recvfrom(1024)
+        print(f"Daemon response: {response.decode()}")
+    except socket.timeout:
+        print("Error: Timeout. No response from daemon.")
 
-            if command == "chat":
-                # Start a chat session
-                ip = input("Enter IP address of the user to chat with: ").strip()
-                response = self.send_request(f"chat {ip}")
-                print(f"Daemon response: {response}")
+# In client.py
+def send_message():
+    try:
+        message = input("Enter your message: ").strip()
+        if message:
+            # Send message to daemon
+            client_socket.sendto(f"message {message}".encode(), daemon_address)
+            
+            # Wait for daemon response
+            response, _ = client_socket.recvfrom(1024)
+            print(f"Daemon response: {response.decode()}")
+        else:
+            print("Message cannot be empty.")
+    except Exception as e:
+        print(f"Error sending message: {e}")
 
-                # Enter chat loop if the chat was initiated successfully
-                if response == "Chat request sent":
-                    print(f"Chat session initiated with {ip}. Waiting for response...")
-                    # Here you might want to add more sophisticated waiting/handling
-                    # Depending on the full protocol implementation
+def receive_messages():
+    """
+    Background thread to receive messages during an active chat
+    """
+    while True:
+        try:
+            client_socket.settimeout(1)  # Non-blocking with short timeout
+            data, _ = client_socket.recvfrom(1024)
+            
+            # Deserialize and display message
+            try:
+                datagram = SIMPDatagram.deserialize(data)
+                if datagram.type == SIMPDatagram.TYPE_CHAT:
+                    print(f"\nReceived message from {datagram.user}: {datagram.payload}")
+                    print("> ", end='', flush=True)
+            except Exception as e:
+                print(f"Error processing received message: {e}")
+        
+        except socket.timeout:
+            continue
+        except Exception as e:
+            print(f"Error in message receiving: {e}")
+            break
 
-            elif command == "quit":
-                # Quit the client
-                response = self.send_request("quit")
-                print(f"Daemon response: {response}")
-                break
+def main():
+    connect_to_daemon()
+    
+    # Start message receiving thread
+    receive_thread = threading.Thread(target=receive_messages, daemon=True)
+    receive_thread.start()
+    
+    while True:
+        command = input("Enter command (chat, message, quit): ").strip().lower()
+        if command == "chat":
+            chat_with_user()
+        elif command == "message":
+            send_message()
+        elif command == "quit":
+            print("Exiting client.")
+            break
+        else:
+            print("Invalid command. Please enter 'chat', 'message', or 'quit'.")
 
-            else:
-                print("Unknown command. Please use 'chat' or 'quit'.")
+# Main loop
+def main():
+    connect_to_daemon()
+    while True:
+        command = input("Enter command (chat, quit): ").strip().lower()
+        if command == "chat":
+            chat_with_user()
+        elif command == "quit":
+            print("Exiting client.")
+            break
+        else:
+            print("Invalid command. Please enter 'chat' or 'quit'.")
 
-# Example usage
 if __name__ == "__main__":
-    client = Client(DAEMON_IP)
-    client.start()
+    main()
