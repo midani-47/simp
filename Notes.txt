@@ -1,4 +1,24 @@
+python3 daemon.py 7777 7778 --peers 127.0.0.1:8889 
+python3 daemon.py 8888 8889 --peers 127.0.0.1:7777
+
+python3 client.py                         127.0.0.1 8888  # Connects to Daemon B
+python3 client.py                         127.0.0.1 7777  # Connects to Daemon A
+
+
+
 Current state summary:
+SIMPDaemon Class
+
+Socket Setup
+Message Handling
+Control Datagram Handling
+Chat Datagram Handling
+Connection Management
+Three-way handshake is partially implemented but needs refinement.
+Connection termination (FIN handling) is not implemented.
+Client Communication
+Methods for client-daemon communication need to be expanded and refined.
+
 
 
 
