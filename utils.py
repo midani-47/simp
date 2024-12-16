@@ -183,62 +183,69 @@ class SIMPDatagram:
             logger.error(f"Serialization error: {e}")
             raise SIMPError(f"Failed to serialize datagram: {e}")
 
-    @classmethod
-    def deserialize(cls, data):
-        """
-        Deserialize a datagram from raw bytes
+    # @classmethod
+    # def deserialize(cls, data):
+    #     """
+    #     Deserialize a datagram from raw bytes
         
-        Args:
-            data (bytes): Raw datagram bytes
+    #     Args:
+    #         data (bytes): Raw datagram bytes
         
-        Returns:
-            SIMPDatagram: Deserialized datagram
+    #     Returns:
+    #         SIMPDatagram: Deserialized datagram
         
-        Raises:
-            SIMPError: If deserialization fails
-        """
+    #     Raises:
+    #         SIMPError: If deserialization fails
+    #     """
+    #     try:
+    #         # Unpack header
+    #         header_format = '!BBBI32sI'
+    #         header_size = struct.calcsize(header_format)
+    #         if len(data) < header_size:
+    #             raise SIMPError("Incomplete datagram")
+            
+    #         datagram_type, operation, sequence, _, user_bytes, payload_length = struct.unpack(
+    #             header_format, data[:header_size]
+    #         )
+            
+    #         # Decode user (remove null padding)
+    #         user = user_bytes.decode('ascii').rstrip('\x00')
+            
+    #         # Extract payload
+    #         payload_start = header_size
+    #         payload_end = payload_start + payload_length
+            
+    #         if len(data) < payload_end:
+    #             raise SIMPError("Payload length exceeds datagram size")
+            
+    #         payload = data[payload_start:payload_end].decode('ascii') if payload_length > 0 else ''
+            
+    #         return cls(
+    #             datagram_type=datagram_type,
+    #             operation=operation,
+    #             sequence=sequence,
+    #             user=user,
+    #             payload=payload
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"Deserialization error: {e}")
+    #         raise SIMPError(f"Failed to deserialize datagram: {e}")
+    @staticmethod
+    def deserialize(data):
         try:
-            # Unpack header
-            header_format = '!BBBI32sI'
-            header_size = struct.calcsize(header_format)
-            # if len(data) < MIN_DATAGRAM_SIZE:  # Define `MIN_DATAGRAM_SIZE` appropriately
-            #     raise SIMPError("Incomplete datagram")
-            # try:
-            #     # Parse data (adjust logic based on your protocol)
-            #     datagram_type = int.from_bytes(data[0:1], "big")
-            #     payload = data[1:].decode("utf-8")
-            #     return SIMPDatagram(datagram_type, payload)
-            # except Exception as e:
-            #     raise SIMPError(f"Failed to deserialize datagram: {e}")
-            if len(data) < header_size:
+            fields = data.decode().split(":")
+            if len(fields) < 4:  # Expecting at least 4 fields in a valid datagram
                 raise SIMPError("Incomplete datagram")
-            
-            datagram_type, operation, sequence, _, user_bytes, payload_length = struct.unpack(
-                header_format, data[:header_size]
-            )
-            
-            # Decode user (remove null padding)
-            user = user_bytes.decode('ascii').rstrip('\x00')
-            
-            # Extract payload
-            payload_start = header_size
-            payload_end = payload_start + payload_length
-            
-            if len(data) < payload_end:
-                raise SIMPError("Payload length exceeds datagram size")
-            
-            payload = data[payload_start:payload_end].decode('ascii') if payload_length > 0 else ''
-            
-            return cls(
-                datagram_type=datagram_type,
-                operation=operation,
-                sequence=sequence,
-                user=user,
-                payload=payload
+            return SIMPDatagram(
+                datagram_type=int(fields[0]),
+                operation=int(fields[1]),
+                sequence=int(fields[2]),
+                user=fields[3],
+                payload=":".join(fields[4:])  # Handle payload with ":" in it
             )
         except Exception as e:
-            logger.error(f"Deserialization error: {e}")
             raise SIMPError(f"Failed to deserialize datagram: {e}")
+
 
     def __repr__(self):
         """

@@ -7,25 +7,32 @@ python3 client.py                         127.0.0.1 7777  # Connects to Daemon A
 
 
 Current state summary:
-SIMPDaemon Class
-
-Socket Setup
-Message Handling
-Control Datagram Handling
-Chat Datagram Handling
-Connection Management
-Three-way handshake is partially implemented but needs refinement.
-Connection termination (FIN handling) is not implemented.
-Client Communication
-Methods for client-daemon communication need to be expanded and refined.
-
+Initialization: Sockets are set up correctly for both client and daemon communication.
+Client-Server Interaction: Partial functionality for connect, chat, and message commands.
+Inter-Daemon Communication: Basic structure for sending and handling control datagrams exists but lacks full implementation.
+Error Handling: Basic logging and error detection are present, but some cases (e.g., missing users) are not handled gracefully.
 
 
 
 
 
 Next Steps:
+Fix Missing Attributes:
 
+Replace connected_users with the existing user_directory.
+Add any additional tracking structures needed for message delivery and chat states.
+Implement Control Datagram Logic:
+
+Complete the handling of SYN, SYN-ACK, ACK, and FIN to establish and terminate chat sessions reliably.
+Message Routing Logic:
+
+Ensure messages from one client reach the intended recipient, even across daemons.
+Client-User Management:
+
+Finalize connect and chat commands to register users and handle chat requests effectively.
+Testing and Debugging:
+
+Test the chat flow between two clients connected to the same daemon and across different daemons.
 
 
 
