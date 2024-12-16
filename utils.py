@@ -201,7 +201,15 @@ class SIMPDatagram:
             # Unpack header
             header_format = '!BBBI32sI'
             header_size = struct.calcsize(header_format)
-            
+            # if len(data) < MIN_DATAGRAM_SIZE:  # Define `MIN_DATAGRAM_SIZE` appropriately
+            #     raise SIMPError("Incomplete datagram")
+            # try:
+            #     # Parse data (adjust logic based on your protocol)
+            #     datagram_type = int.from_bytes(data[0:1], "big")
+            #     payload = data[1:].decode("utf-8")
+            #     return SIMPDatagram(datagram_type, payload)
+            # except Exception as e:
+            #     raise SIMPError(f"Failed to deserialize datagram: {e}")
             if len(data) < header_size:
                 raise SIMPError("Incomplete datagram")
             

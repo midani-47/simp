@@ -41,6 +41,7 @@ def chat_with_user():
     except socket.timeout:
         print("Error: Timeout. No response from daemon.")
 
+
 # In client.py
 def send_message():
     try:
@@ -80,9 +81,8 @@ def receive_messages():
         except Exception as e:
             print(f"Error in message receiving: {e}")
             break
-
 def main():
-    connect_to_daemon()
+    daemon = connect_to_daemon()  # Establish a connection to the daemon
     
     # Start message receiving thread
     receive_thread = threading.Thread(target=receive_messages, daemon=True)
@@ -91,27 +91,25 @@ def main():
     while True:
         command = input("Enter command (chat, message, quit): ").strip().lower()
         if command == "chat":
-            chat_with_user()
+            print("Fetching list of connected users...")
+            daemon.send_request("list_users", "")  # Request list of users
+            response = daemon.receive_response()
+            print(response)  # Display connected users
+            
+            target_user = input("Enter the username of the user to chat with: ").strip()
+            daemon.send_request("chat", target_user)  # Initiate chat request
+            chat_response = daemon.receive_response()
+            print(chat_response)  # Handle the response from the daemon
         elif command == "message":
-            send_message()
+            message = input("Enter your message: ")
+            daemon.send_request("message", message)  # Send a single message
+            print("Message sent successfully.")
         elif command == "quit":
             print("Exiting client.")
             break
         else:
             print("Invalid command. Please enter 'chat', 'message', or 'quit'.")
 
-# Main loop
-def main():
-    connect_to_daemon()
-    while True:
-        command = input("Enter command (chat, quit): ").strip().lower()
-        if command == "chat":
-            chat_with_user()
-        elif command == "quit":
-            print("Exiting client.")
-            break
-        else:
-            print("Invalid command. Please enter 'chat' or 'quit'.")
 
 if __name__ == "__main__":
     main()
