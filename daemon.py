@@ -375,27 +375,29 @@ class SIMPDaemon:
             user=requester,
             payload=target_username
         )
+        logger.info(f"Forwarding chat request for {requester} to {target_username}")
+        logger.debug(f"Serialized SYN datagram: {syn_datagram.serialize()}")
         
         for peer_ip, peer_port in self.peers:
             try:
                 logger.debug(f"Sending SYN to peer {peer_ip}:{peer_port}")
-                serialized_datagram = syn_datagram.serialize()
-                self.daemon_socket.sendto(serialized_datagram, (peer_ip, peer_port))
+                self.daemon_socket.sendto(syn_datagram.serialize(), (peer_ip, peer_port))
                 
-                # Wait for response with proper timeout
-                self.daemon_socket.settimeout(5)
+                # Add a timeout for receiving response
+                self.daemon_socket.settimeout(5)  # 5-second timeout
                 response, _ = self.daemon_socket.recvfrom(1024)
                 
-                # Try to deserialize the response
-                datagram = SIMPDatagram.deserialize(response)
+                logger.debug(f"Received raw response from peer {peer_ip}:{peer_port}: {response}")
                 
+                datagram = SIMPDatagram.deserialize(response)
+                logger.debug(f"Deserialized response: {datagram}")
+
                 if datagram.operation == SIMPDatagram.OP_SYN_ACK:
-                    logger.info(f"SYN-ACK received from {peer_ip}:{peer_port}")
                     return True
             except socket.timeout:
-                logger.warning(f"Timeout waiting for SYN-ACK from {peer_ip}:{peer_port}")
+                logger.warning(f"Timeout when contacting peer daemon at {peer_ip}:{peer_port}")
             except Exception as e:
-                logger.error(f"Error forwarding request to peer {peer_ip}:{peer_port}: {e}")
+                logger.warning(f"Failed to contact peer daemon at {peer_ip}:{peer_port}: {e}")
         return False
 
     def handle_peer_message(self, message, addr):
@@ -518,61 +520,54 @@ class SIMPDaemon:
 
     
     def handle_daemon_messages(self):
-        """
-        Robust handling of incoming daemon messages with comprehensive error checking
-        """
+        """Process a single incoming message from another daemon."""
         try:
-            # Increase buffer size to handle larger datagrams
-            data, addr = self.daemon_socket.recvfrom(4096)
-            
-            # Log raw received data for debugging
-            logger.debug(f"Raw data received from {addr}: {data.hex()}")
+            data, addr = self.daemon_socket.recvfrom(1024)
+            logger.debug(f"Raw data received from {addr}: {data}")
             
             try:
-                # Attempt to deserialize the datagram
                 datagram = SIMPDatagram.deserialize(data)
-                
-                # Route based on datagram type
+                logger.info(f"Deserialized datagram: {datagram}")
+
+                # Handle different datagram types
                 if datagram.type == SIMPDatagram.TYPE_CONTROL:
                     self.handle_control_datagram(datagram, addr)
                 elif datagram.type == SIMPDatagram.TYPE_CHAT:
-                    self._handle_chat_datagram(datagram, addr)
-                else:
-                    logger.warning(f"Unknown datagram type: {datagram.type}")
-            
-            except SIMPError as protocol_error:
-                # Handle protocol-specific errors
-                logger.warning(f"Protocol error from {addr}: {protocol_error}")
+                    self.handle_chat_datagram(datagram, addr)
+            except SIMPError as e:
+                logger.warning(f"Invalid datagram from {addr}: {e}")
                 # Optionally send an error response
-                self.send_error_response(addr, str(protocol_error))
-            
+                self.send_error_response(addr, str(e))
         except Exception as e:
-            logger.error(f"Unexpected error processing daemon message: {e}")
-            logger.debug(f"Deserialized datagram: {datagram}")
+            logger.error(f"Daemon message processing error: {e}")
+
     
     
     def handle_control_datagram(self, datagram, addr):
-        """
-        Handle incoming control datagrams based on their operation type.
-        """
+        """Enhanced error handling for control datagrams"""
         try:
-            logger.info(f"Received control datagram from {addr}: {datagram}")
-
-            # Route the control datagram based on operation
+            logger.info(f"Processing control datagram: {datagram}")
+            
             if datagram.operation == SIMPDatagram.OP_SYN:
                 self._handle_syn_request(datagram, addr)
+            elif datagram.operation == SIMPDatagram.OP_SYN_ACK:
+                self._handle_syn_ack(datagram, addr)
             elif datagram.operation == SIMPDatagram.OP_ACK:
                 self._handle_ack(datagram, addr)
             elif datagram.operation == SIMPDatagram.OP_FIN:
                 self._handle_fin(datagram, addr)
-            elif datagram.operation == SIMPDatagram.OP_ERROR:
-                logger.error(f"Error datagram received: {datagram.payload}")
+            elif datagram.operation == SIMPDatagram.OP_USER_REGISTER:
+                # Assuming you have this method
+                self._handle_user_registration(datagram, addr)
             else:
                 logger.warning(f"Unknown control operation: {datagram.operation}")
-                self.send_error_response(addr, "Unknown control operation.")
+        except SIMPError as e:
+            logger.warning(f"Error processing control datagram from {addr}: {e}")
+            # Send an error response back to the sender
+            self.send_error_response(addr, str(e))
         except Exception as e:
-            logger.error(f"Error handling control datagram: {e}")
-            self.send_error_response(addr, "Failed to process control datagram.")
+            logger.error(f"Unexpected error handling control datagram: {e}")
+            self.send_error_response(addr, "Unexpected error processing datagram")
 
 
 

@@ -1,0 +1,33 @@
+2024-12-17 18:21:16,691 - __main__ - INFO - Daemon started. Listening on ports: Client 7777, Daemon 7778
+2024-12-17 18:21:18,804 - __main__ - INFO - Daemon started. Listening on ports: Client 8888, Daemon 8889
+2024-12-17 18:21:43,210 - __main__ - INFO - Client message from ('127.0.0.1', 54268): connect:
+2024-12-17 18:21:43,210 - root - INFO - Message sent to client at ('127.0.0.1', 54268): USERNAME_REQUEST
+2024-12-17 18:21:49,834 - __main__ - INFO - Client message from ('127.0.0.1', 55235): connect:
+2024-12-17 18:21:49,835 - root - INFO - Message sent to client at ('127.0.0.1', 55235): USERNAME_REQUEST
+2024-12-17 18:21:55,275 - __main__ - INFO - Client message from ('127.0.0.1', 55235): username:c1
+2024-12-17 18:21:55,275 - root - INFO - Message sent to client at ('127.0.0.1', 55235): Welcome c1!
+2024-12-17 18:21:58,126 - __main__ - INFO - Client message from ('127.0.0.1', 54268): username:c2
+2024-12-17 18:21:58,126 - root - INFO - Message sent to client at ('127.0.0.1', 54268): Welcome c2!
+2024-12-17 18:22:12,671 - __main__ - INFO - Client message from ('127.0.0.1', 55235): chat:c2
+2024-12-17 18:22:12,671 - __main__ - INFO - Forwarding chat request for c1 to c2
+2024-12-17 18:22:12,671 - __main__ - DEBUG - Serialized SYN datagram: b'\x01\x02\x00\x00c1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02c2'
+2024-12-17 18:22:12,671 - __main__ - DEBUG - Sending SYN to peer 127.0.0.1:8889
+2024-12-17 18:22:12,672 - __main__ - DEBUG - Raw data received from ('127.0.0.1', 7778): b'\x01\x02\x00\x00c1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02c2'
+2024-12-17 18:22:12,672 - __main__ - INFO - Deserialized datagram: SIMPDatagram(type=0x1, operation=0x2, sequence=0, user='c1', payload='c2')
+2024-12-17 18:22:12,672 - __main__ - INFO - Processing control datagram: SIMPDatagram(type=0x1, operation=0x2, sequence=0, user='c1', payload='c2')
+2024-12-17 18:22:12,672 - __main__ - INFO - Handling SYN request from c1 to c2
+2024-12-17 18:22:12,672 - root - INFO - Message sent to client at ('127.0.0.1', 54268): CHAT_REQUEST:c1
+2024-12-17 18:22:12,672 - __main__ - INFO - SYN-ACK sent to ('127.0.0.1', 7778) for chat request c1 -> c2
+2024-12-17 18:22:12,672 - __main__ - DEBUG - Received raw response from peer 127.0.0.1:8889: b'\x01\x02\x00\x00c1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02c2'
+2024-12-17 18:22:12,672 - __main__ - DEBUG - Deserialized response: SIMPDatagram(type=0x1, operation=0x2, sequence=0, user='c1', payload='c2')
+2024-12-17 18:22:12,672 - __main__ - DEBUG - Raw data received from ('127.0.0.1', 8889): b'\x01\x03\x00\x00c1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02c2'
+2024-12-17 18:22:12,672 - __main__ - INFO - Deserialized datagram: SIMPDatagram(type=0x1, operation=0x3, sequence=0, user='c1', payload='c2')
+2024-12-17 18:22:12,672 - __main__ - INFO - Processing control datagram: SIMPDatagram(type=0x1, operation=0x3, sequence=0, user='c1', payload='c2')
+2024-12-17 18:22:12,672 - utils - ERROR - Deserialization error: Incomplete datagram header
+2024-12-17 18:22:12,672 - root - INFO - Message sent to client at ('127.0.0.1', 55235): CHAT_ACCEPTED:c2
+2024-12-17 18:22:12,672 - root - INFO - CHAT_ACCEPTED sent to client: c1
+2024-12-17 18:22:12,672 - root - INFO - ACK sent for chat: c1 -> c2
+2024-12-17 18:22:12,672 - __main__ - DEBUG - Raw data received from ('127.0.0.1', 7778): b'\x01\x04\x01\x00c1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02c2'
+2024-12-17 18:22:12,673 - __main__ - INFO - Deserialized datagram: SIMPDatagram(type=0x1, operation=0x4, sequence=1, user='c1', payload='c2')
+2024-12-17 18:22:12,673 - __main__ - INFO - Processing control datagram: SIMPDatagram(type=0x1, operation=0x4, sequence=1, user='c1', payload='c2')
+2024-12-17 18:22:12,673 - utils - ERROR - Deserialization error: Incomplete datagram header
