@@ -12,8 +12,9 @@ class SIMPClient:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('127.0.0.1', 0))  # Bind to an available port
         self.socket.settimeout(10)  # Set a timeout for responses
-        self.server_address = (host, port)
         self.username = ""
+        self.in_chat = False
+        self.chat_partner = None
 
     def send_request(self, command, payload=""):
         """Send a formatted request to the daemon."""
@@ -57,6 +58,58 @@ class SIMPClient:
             print("Message request timed out.")
             return None
 
+    def send_chat_message(self, message):
+        """Send a chat message during an active chat session."""
+        try:
+            datagram = SIMPDatagram(
+                datagram_type=SIMPDatagram.TYPE_CHAT,
+                operation=0,
+                sequence=0,
+                user=self.username,
+                payload=message
+            )
+            serialized = datagram.serialize()
+            self.socket.sendto(serialized, self.server_address)
+            # Wait for acknowledgment
+            try:
+                response, _ = self.socket.recvfrom(1024)
+                return True
+            except socket.timeout:
+                print("Message delivery timeout")
+                return False
+        except Exception as e:
+            print(f"Error sending chat message: {e}")
+            return False
+        
+
+    def chat_mode(self, target_user):
+        """Enter chat mode with the specified user."""
+        self.in_chat = True
+        self.chat_partner = target_user
+        print(f"\nEntered chat mode with {target_user}")
+        print("Type 'exit' to leave chat mode")
+        
+        while self.in_chat:
+            try:
+                message = input("Chat> ").strip()
+                if message.lower() == 'exit':
+                    self.in_chat = False
+                    self.chat_partner = None
+                    print("Exiting chat mode...")
+                    break
+                
+                if message:
+                    if not self.send_chat_message(message):
+                        print("Failed to send message. Exiting chat mode...")
+                        self.in_chat = False
+                        self.chat_partner = None
+                        break
+            except KeyboardInterrupt:
+                self.in_chat = False
+                self.chat_partner = None
+                print("\nChat mode terminated.")
+                break
+
     def close(self):
         """Close the client socket."""
         self.socket.close()
@@ -83,43 +136,32 @@ class SIMPClient:
     def receive_messages(client_socket):
         while True:
             try:
-                client_socket.settimeout(1)
                 data, _ = client_socket.recvfrom(1024)
-                
-                # Try to handle as datagram first
                 try:
-                    if len(data) >= 39:  # Check minimum datagram size
-                        datagram = SIMPDatagram.deserialize(data)
-                        if datagram.type == SIMPDatagram.TYPE_CHAT:
-                            print(f"\nReceived message from {datagram.user}: {datagram.payload}")
-                            print("> ", end='', flush=True)
+                    datagram = SIMPDatagram.deserialize(data)
+                    if datagram.type == SIMPDatagram.TYPE_CHAT:
+                        print(f"\n{datagram.user}: {datagram.payload}")
+                        print("Chat> ", end='', flush=True)
                         continue
                 except:
-                    pass
-
-                # Handle as plain text
-                message = data.decode('utf-8')
-                print(f"\nReceived: {message}")
-                print("> ", end='', flush=True)
-
+                    # Handle as plain text if not a datagram
+                    message = data.decode('utf-8')
+                    print(f"\nReceived: {message}")
+                    print("Chat> ", end='', flush=True)
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"Error in message receiving: {e}")
+                print(f"Error receiving message: {e}")
                 break
 
 
 def main():
-    """Main function for the client."""
-    # Use command-line arguments for host and port
     if len(sys.argv) < 3:
         print("Usage: python3 client.py <host> <port>")
         sys.exit(1)
 
     host = sys.argv[1]
     port = int(sys.argv[2])
-
-    # Initialize the client
     client = SIMPClient(host, port)
 
     print(f"Connecting to daemon at {host}:{port}...")
@@ -127,27 +169,44 @@ def main():
         print("Failed to connect to daemon.")
         return
 
-    # Start the message receiving thread
     receive_thread = threading.Thread(target=SIMPClient.receive_messages, args=(client.socket,), daemon=True)
     receive_thread.start()
 
     while True:
-        command = input("Enter command (chat, message, quit): ").strip().lower()
-        if command == "chat":
-            target_user = input("Enter the username of the user to chat with: ").strip()
-            response = client.chat(target_user)
-            if response:
-                print(f"Chat response: {response}")
-        elif command == "message":
-            message = input("Enter your message: ").strip()
-            response = client.message(message)
-            if response:
-                print(f"Message response: {response}")
-        elif command == "quit":
-            print("Exiting...")
-            break
-        else:
-            print("Invalid command.")
+        try:
+            if not client.in_chat:
+                command = input("\nEnter command (chat, quit, accept, reject): ").strip().lower()
+                
+                if command == "chat":
+                    target_user = input("Enter username to chat with: ").strip()
+                    response = client.chat(target_user)
+                    if response and "CHAT_ACCEPTED" in response:
+                        client.chat_mode(target_user)
+                
+                elif command == "accept":
+                    client.send_request("accept")
+                    print("Chat request accepted.")
+                    # Get the last requester from the message buffer
+                    if client.chat_partner:
+                        client.chat_mode(client.chat_partner)
+                
+                elif command == "reject":
+                    client.send_request("reject")
+                    print("Chat request rejected.")
+                
+                elif command == "quit":
+                    print("Exiting...")
+                    break
+                
+            else:
+                # We're in chat mode, messages are handled in chat_mode()
+                pass
+
+        except Exception as e:
+            print(f"Error: {e}")
+            if client.in_chat:
+                client.in_chat = False
+                client.chat_partner = None
 
     client.close()
 
