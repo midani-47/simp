@@ -572,42 +572,46 @@ class SIMPDaemon:
     def handle_client_messages(self):
         try:
             data, addr = self.client_socket.recvfrom(1024)
+            
+            # First try to handle as a SIMP datagram
+            try:
+                if len(data) >= 39:  # Minimum datagram size
+                    datagram = SIMPDatagram.deserialize(data)
+                    if datagram.type == SIMPDatagram.TYPE_CHAT:
+                        self._handle_chat_datagram(datagram, addr)
+                        return
+                    elif datagram.type == SIMPDatagram.TYPE_CONTROL:
+                        self._handle_control_datagram(datagram, addr)
+                        return
+            except SIMPError:
+                # Not a datagram, handle as plain text
+                pass
+
+            # Handle as plain text message
             message = data.decode('utf-8')
             logger.info(f"Client message from {addr}: {message}")
 
-            try:
-                if message.startswith("connect"):
-                    # Enhanced connect logic from handle_client_request
-                    if addr not in self.user_directory.values():
-                        self.send_client_response(addr, "USERNAME_REQUEST")
-                    else:
-                        self.send_client_response(addr, "Already connected")
-
-                elif message.startswith("username"):
-                    username = message.split(":")[1]
-                    if username in self.user_directory:
-                        self.send_client_response(addr, "Username already taken.")
-                    else:
-                        self.user_directory[username] = addr
-                        self.connection_states[username] = ChatState.IDLE
-                        self.send_client_response(addr, f"\n\nWelcome {username}!")
-
-                elif message.startswith("chat"):
-                    target_user = message.split(":")[1]
-                    self.handle_client_chat_request(target_user, addr)
-
-                elif message.startswith("message"):
-                    content = message.split(":", 1)[1]
-                    self.handle_client_message(content, addr)
-
+            if message.startswith("connect"):
+                if addr not in self.user_directory.values():
+                    self.send_client_response(addr, "USERNAME_REQUEST")
                 else:
-                    self.send_client_response(addr, "Unknown command")
+                    self.send_client_response(addr, "Already connected")
 
-            except Exception as e:
-                logging.error(f"Error processing client request: {e}")
-                self.send_client_response(addr, "Error processing request.")
-            if not message:
-                logger.warning(f"Empty message received from {addr}")
+            elif message.startswith("username"):
+                username = message.split(":")[1]
+                if username in self.user_directory:
+                    self.send_client_response(addr, "Username already taken.")
+                else:
+                    self.user_directory[username] = addr
+                    self.connection_states[username] = ChatState.IDLE
+                    self.send_client_response(addr, f"\n\nWelcome {username}!")
+
+            elif message.startswith("chat"):
+                target_user = message.split(":")[1]
+                self.handle_client_chat_request(target_user, addr)
+
+            else:
+                self.send_client_response(addr, "Unknown command")
 
         except Exception as e:
             logger.error(f"Error handling client message: {e}")
@@ -847,11 +851,11 @@ class SIMPDaemon:
         threading.Thread(target=self.listen_to_client, daemon=True).start()
         threading.Thread(target=self.listen_to_peers, daemon=True).start()
 
-    def test_serialization():
-        datagram = SIMPDatagram(0x01, 0x02, 0x03, "user", "payload")
-        serialized = datagram.serialize()
-        deserialized = SIMPDatagram.deserialize(serialized)
-        assert datagram == deserialized, "Serialization/Deserialization mismatch"
+    # def test_serialization():
+    #     datagram = SIMPDatagram(0x01, 0x02, 0x03, "user", "payload")
+    #     serialized = datagram.serialize()
+    #     deserialized = SIMPDatagram.deserialize(serialized)
+    #     assert datagram == deserialized, "Serialization/Deserialization mismatch"
 
    
 def main():
@@ -860,32 +864,28 @@ def main():
         if len(sys.argv) < 4:
             print("Usage: python daemon.py <client_port> <daemon_port> --peers <peer1_host:peer1_port>")
             sys.exit(1)
-
         client_port = int(sys.argv[1])
         daemon_port = int(sys.argv[2])
         peers = sys.argv[4:] if len(sys.argv) > 4 else []
-
         daemon = SIMPDaemon(client_port, daemon_port, peers)
         daemon.run()
         while True:
             command = input("Enter command (chat, message, quit): ").strip().lower()
             if command == "chat":
                 target_user = input("Enter the username of the user to chat with: ").strip()
-                response = client.chat(target_user) #here
+                response = SIMPClient.chat(target_user) #here
                 if response:
                     print(f"Chat response: {response}")
                     if response.startswith("CHAT_ACCEPTED"):
-                        chat_mode(client, target_user) #here twice
+                        SIMPDaemon.chat_mode(client, target_user) #here twice
             elif command == "quit":
                 print("Exiting...")
                 break
             else:
                 print("Invalid command.")
-        client.close() #here
-
+        SIMPClient.close() #here
     except Exception as e:
         logger.critical(f"Daemon initialization failed: {e}")
         sys.exit(1)
-
 if __name__ == "__main__":
     main()

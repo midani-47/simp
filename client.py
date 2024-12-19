@@ -81,18 +81,27 @@ class SIMPClient:
             raise ConnectionError(f"Error sending message: {e}")
 
     def receive_messages(client_socket):
-        """Background thread to receive messages during an active chat."""
         while True:
             try:
-                client_socket.settimeout(1)  # Non-blocking with short timeout
+                client_socket.settimeout(1)
                 data, _ = client_socket.recvfrom(1024)
+                
+                # Try to handle as datagram first
                 try:
-                    datagram = SIMPDatagram.deserialize(data)
-                    if datagram.type == SIMPDatagram.TYPE_CHAT:
-                        print(f"\nReceived message from {datagram.user}: {datagram.payload}")
-                        print("> ", end='', flush=True)
-                except Exception as e:
-                    print(f"Error processing received message: {e}")
+                    if len(data) >= 39:  # Check minimum datagram size
+                        datagram = SIMPDatagram.deserialize(data)
+                        if datagram.type == SIMPDatagram.TYPE_CHAT:
+                            print(f"\nReceived message from {datagram.user}: {datagram.payload}")
+                            print("> ", end='', flush=True)
+                        continue
+                except:
+                    pass
+
+                # Handle as plain text
+                message = data.decode('utf-8')
+                print(f"\nReceived: {message}")
+                print("> ", end='', flush=True)
+
             except socket.timeout:
                 continue
             except Exception as e:
