@@ -492,6 +492,7 @@ class SIMPDaemon:
 
         if target_username in self.user_directory:
             self._notify_client_chat_request(target_username, requester)
+            self.client_socket.sendto("Chat request sent.".encode(), addr)
         else:
             success = self.forward_chat_request_to_peers(target_username, addr)
             if not success:

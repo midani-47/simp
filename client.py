@@ -19,8 +19,8 @@ class SIMPClient:
         self.pending_chat_requests = set()  # Tracking pending chat requests
 
 
-    def send_datagram(self, datagram_type, operation, payload="", timeout=5):
-        """Send a properly formatted SIMP datagram."""
+    def send_datagram(self, datagram_type, operation, payload="", timeout=10):
+        """Send a properly formatted SIMP datagram with increased timeout."""
         try:
             self.sequence_number = (self.sequence_number + 1) % 2
             datagram = SIMPDatagram(
@@ -196,7 +196,7 @@ class SIMPClient:
     def receive_messages(self):
         while True:
             try:
-                self.socket.settimeout(1)
+                self.socket.settimeout(5)
                 data, _ = self.socket.recvfrom(4096)
                 
                 try:
