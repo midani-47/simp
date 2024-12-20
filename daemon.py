@@ -161,30 +161,6 @@ class SIMPDaemon:
             print(f"Error: User {target_username} not found in user directory")
 
 
-    # def _synchronize_user_directory(self, username, addr):
-    #     """
-    #     Broadcast user registration to all peer daemons
-    #     """
-    #     # Create a registration datagram
-    #     registration_datagram = SIMPDatagram(
-    #         datagram_type=SIMPDatagram.TYPE_CONTROL,
-    #         operation=SIMPDatagram.OP_USER_REGISTER,
-    #         sequence=0,
-    #         user=username,
-    #         payload=f"{addr[0]}:{addr[1]}"
-    #     )
-    #     # Send to all peers
-    #     for peer_ip, peer_port in self.peers:
-    #         try:
-    #             self.daemon_socket.sendto(
-    #                 registration_datagram.serialize(), 
-    #                 (peer_ip, peer_port)
-    #             )
-    #             logger.info(f"User {username} registration broadcasted to {peer_ip}:{peer_port}")
-    #         except Exception as e:
-    #             logger.warning(f"Failed to broadcast user registration to {peer_ip}:{peer_port}: {e}")
-
-
     def _handle_user_registration(self, datagram, addr):
         try:
             username = datagram.user.strip()
