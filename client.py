@@ -189,27 +189,41 @@ class SIMPClient:
                 break
 
     def receive_messages(self):
-        """Improved message receiving with SIMP datagram handling."""
         while True:
             try:
                 self.socket.settimeout(1)
-                data, _ = self.socket.recvfrom(1024)
+                data, _ = self.socket.recvfrom(4096)
                 
                 try:
                     datagram = SIMPDatagram.deserialize(data)
                     
                     if datagram.type == SIMPDatagram.TYPE_CONTROL:
                         if datagram.operation == SIMPDatagram.OP_SYN:
-                            self.pending_chat_requests.add(datagram.user)  # Track the requester
+                            # Received chat request
                             print(f"\nChat request from {datagram.user}")
-                            print("Type 'accept <username>' to accept or 'reject <username>' to decline")
+                            print("Type 'accept' to accept or 'reject' to decline")
                             print("> ", end='', flush=True)
-                    # ... (rest of the method remains the same)
-                
+                        elif datagram.operation == SIMPDatagram.OP_SYN_ACK:
+                            # Chat request accepted
+                            print(f"\nChat connection established with {datagram.user}")
+                            print("Chat> ", end='', flush=True)
+                        elif datagram.operation == SIMPDatagram.OP_FIN:
+                            # Chat ended
+                            print(f"\nChat ended by {datagram.user}")
+                            print("> ", end='', flush=True)
+                    elif datagram.type == SIMPDatagram.TYPE_CHAT:
+                        # Regular chat message
+                        print(f"\n{datagram.user}: {datagram.payload}")
+                        if self.in_chat:
+                            print("Chat> ", end='', flush=True)
+                        else:
+                            print("> ", end='', flush=True)
+                    
                 except SIMPError:
+                    # Fall back to string handling for backward compatibility
                     message = data.decode('utf-8')
                     self._handle_legacy_message(message)
-            
+                
             except socket.timeout:
                 continue
             except Exception as e:

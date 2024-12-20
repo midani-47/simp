@@ -163,3 +163,40 @@ class SIMPDatagram:
                 f"sequence={self.sequence}, "
                 f"user='{self.user}', "
                 f"payload='{self.payload}')")
+
+class SIMPClient:
+    ...
+    def send_datagram(self, datagram_type, operation, payload=""):
+        """Send a properly formatted SIMP datagram."""
+        try:
+            self.sequence_number = (self.sequence_number + 1) % 2
+            datagram = SIMPDatagram(
+                datagram_type=datagram_type,
+                operation=operation,
+                sequence=self.sequence_number,
+                user=self.username,
+                payload=payload
+            )
+            
+            # Send the datagram
+            serialized = datagram.serialize()
+            self.socket.sendto(serialized, self.server_address)
+            
+            # Receive response with proper buffer size
+            response, _ = self.socket.recvfrom(4096)  # Increased buffer size
+            
+            # Try to deserialize as datagram first
+            try:
+                return SIMPDatagram.deserialize(response)
+            except SIMPError:
+                # Fall back to string response only if deserialization fails
+                try:
+                    return response.decode('utf-8')
+                except UnicodeDecodeError:
+                    raise SIMPError("Invalid response format")
+
+        except socket.timeout:
+            raise TimeoutError("No response from daemon")
+        except Exception as e:
+            raise ConnectionError(f"Error during request: {e}")
+    ...
