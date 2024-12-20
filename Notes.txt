@@ -1,5 +1,5 @@
 python3 daemon.py 7777 7778 --peers 127.0.0.1:8889 
-python3 daemon.py 8888 8889 --peers 127.0.0.1:7777
+python3 daemon.py 8888 8889 --peers 127.0.0.1:7778
 
 python3 client.py 127.0.0.1 7777
 python3 client.py 127.0.0.1 8888
@@ -7,47 +7,8 @@ python3 client.py 127.0.0.1 8888
 
 
 Current state summary:
-Initialization: Sockets are set up correctly for both client and daemon communication.
-Client-Server Interaction: Partial functionality for connect, chat, and message commands.
-Inter-Daemon Communication: Basic structure for sending and handling control datagrams exists but lacks full implementation.
-Error Handling: Basic logging and error detection are present, but some cases (e.g., missing users) are not handled gracefully.
-
 
 
 
 
 Next Steps:
-Fix Missing Attributes:
-
-Replace connected_users with the existing user_directory.
-Add any additional tracking structures needed for message delivery and chat states.
-Implement Control Datagram Logic:
-
-Complete the handling of SYN, SYN-ACK, ACK, and FIN to establish and terminate chat sessions reliably.
-Message Routing Logic:
-
-Ensure messages from one client reach the intended recipient, even across daemons.
-Client-User Management:
-
-Finalize connect and chat commands to register users and handle chat requests effectively.
-Testing and Debugging:
-
-Test the chat flow between two clients connected to the same daemon and across different daemons.
-
-
-
-
-The distinction depends on your intended functionality:
-
-chat:
-
-Establishes a persistent session with a specific user.
-For example, messages could flow between the two users until one exits the session.
-message:
-
-Sends a single message without initiating a session.
-Similar to sending an email or a one-off notification.
-For your code:
-
-Ensure chat sets up a session between two clients.
-Ensure message supports sending a single message to an available user.

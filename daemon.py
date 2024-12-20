@@ -153,35 +153,45 @@ class SIMPDaemon:
             return None
 
 
-    # def _notify_client_chat_request(self, target_username, requester):
-    #     target_addr = self.user_directory.get(target_username)
-    #     if target_addr:
-    #         message = f"Chat request from {requester}"
-    #         self.send_client_response(target_addr, message)
+    def _notify_client_chat_request(self, target_username, requester):
+        """Notify client about incoming chat request"""
+        target_addr = self.user_directory.get(target_username)
+        if target_addr:
+            notify_datagram = SIMPDatagram(
+                datagram_type=SIMPDatagram.TYPE_CONTROL,
+                operation=SIMPDatagram.OP_SYN,
+                sequence=0,
+                user=requester,
+                payload=f"CHAT_REQUEST:{requester}"
+            )
+            self.client_socket.sendto(notify_datagram.serialize(), target_addr)
+        else:
+            # Handle the case where target_addr is None
+            print(f"Error: User {target_username} not found in user directory")
 
 
-    def _synchronize_user_directory(self, username, addr):
-        """
-        Broadcast user registration to all peer daemons
-        """
-        # Create a registration datagram
-        registration_datagram = SIMPDatagram(
-            datagram_type=SIMPDatagram.TYPE_CONTROL,
-            operation=SIMPDatagram.OP_USER_REGISTER,
-            sequence=0,
-            user=username,
-            payload=f"{addr[0]}:{addr[1]}"
-        )
-        # Send to all peers
-        for peer_ip, peer_port in self.peers:
-            try:
-                self.daemon_socket.sendto(
-                    registration_datagram.serialize(), 
-                    (peer_ip, peer_port)
-                )
-                logger.info(f"User {username} registration broadcasted to {peer_ip}:{peer_port}")
-            except Exception as e:
-                logger.warning(f"Failed to broadcast user registration to {peer_ip}:{peer_port}: {e}")
+    # def _synchronize_user_directory(self, username, addr):
+    #     """
+    #     Broadcast user registration to all peer daemons
+    #     """
+    #     # Create a registration datagram
+    #     registration_datagram = SIMPDatagram(
+    #         datagram_type=SIMPDatagram.TYPE_CONTROL,
+    #         operation=SIMPDatagram.OP_USER_REGISTER,
+    #         sequence=0,
+    #         user=username,
+    #         payload=f"{addr[0]}:{addr[1]}"
+    #     )
+    #     # Send to all peers
+    #     for peer_ip, peer_port in self.peers:
+    #         try:
+    #             self.daemon_socket.sendto(
+    #                 registration_datagram.serialize(), 
+    #                 (peer_ip, peer_port)
+    #             )
+    #             logger.info(f"User {username} registration broadcasted to {peer_ip}:{peer_port}")
+    #         except Exception as e:
+    #             logger.warning(f"Failed to broadcast user registration to {peer_ip}:{peer_port}: {e}")
 
 
     def _handle_user_registration(self, datagram, addr):
@@ -257,46 +267,53 @@ class SIMPDaemon:
 
 
     def _handle_syn_request(self, datagram, addr):
-        """
-        Handle SYN (synchronization) chat request to initiate a three-way handshake.
-        """
+        """Enhanced SYN request handling with proper state management."""
         try:
-            # Extract requester and target user
             requester = datagram.user
             target_user = datagram.payload.strip()
 
             logger.info(f"Handling SYN request from {requester} to {target_user}")
 
-            # Check if the target user exists
+            # Update states
+            self.connection_states[requester] = ChatState.SYN_SENT
+            self.connection_states[target_user] = ChatState.SYN_RECEIVED
+            self._notify_client_chat_request(target_user, requester) # Notify target user
+
             if target_user not in self.user_directory:
                 self.send_error_response(addr, f"User '{target_user}' not found.")
                 return
 
-            # Check if the target user is busy (already in a chat)
             if self.connection_states.get(target_user) == ChatState.CONNECTED:
                 self.send_error_response(addr, f"User '{target_user}' is busy in another chat.")
                 return
 
-            # Notify the target user about the chat request
-            target_addr = self.user_directory[target_user]
-            self.send_client_response(target_addr, f"CHAT_REQUEST:{requester}")
+            # Set both users to PENDING state, but i'm not sure if this is being tracked properly
+            self.connection_states[requester] = ChatState.PENDING
+            self.connection_states[target_user] = ChatState.PENDING
 
-            syn_datagram = SIMPDatagram(
+            # Notify the target user
+            target_addr = self.user_directory[target_user]
+            notify_datagram = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CONTROL,
                 operation=SIMPDatagram.OP_SYN,
                 sequence=datagram.sequence,
-                user=requester,  # Ensure 'user' is set to the requesting username
+                user=requester,
                 payload=target_user
             )
-            self.daemon_socket.sendto(syn_datagram.serialize(), addr)
+            self.client_socket.sendto(notify_datagram.serialize(), target_addr)
+            # Update states
+            self.connection_states[requester] = ChatState.SYN_SENT
+            self.connection_states[target_user] = ChatState.SYN_RECEIVED
+            self._notify_client_chat_request(target_user, requester) # Notify target user
 
-            # Send SYN-ACK back to the requester
+
+            # Send SYN-ACK
             syn_ack = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CONTROL,
                 operation=SIMPDatagram.OP_SYN_ACK,
-                sequence=datagram.sequence,  # Keep the same sequence number
-                user=requester,
-                payload=target_user
+                sequence=datagram.sequence,
+                user=target_user,
+                payload=requester
             )
             self.daemon_socket.sendto(syn_ack.serialize(), addr)
             logger.info(f"SYN-ACK sent to {addr} for chat request {requester} -> {target_user}")
@@ -308,37 +325,45 @@ class SIMPDaemon:
 
 
     def _handle_syn_ack(self, datagram, addr):
-        """Handle SYN-ACK response."""
-        requester = datagram.user
-        target_user = datagram.payload.strip()
-        self.connection_states[requester] = ChatState.CONNECTED
-        self.connection_states[target_user] = ChatState.CONNECTED
-        requester_addr = self.user_directory.get(requester)
-        if requester_addr:
-            self.send_client_response(requester_addr, f"CHAT_ACCEPTED:{target_user}")
-        # Transition to ACK_WAITING before marking connection as CONNECTED
-        if requester in self.connection_states and self.connection_states[requester] == ChatState.SYN_SENT:
-            self.connection_states[requester] = ChatState.ACK_WAITING
-            logging.info(f"Connection state updated: {requester} -> ACK_WAITING")
+        """Enhanced SYN-ACK handling with proper state management."""
+        try:
+            requester = datagram.user
+            target_user = datagram.payload.strip()
 
-        # Notify the requester client of chat acceptance
-        requester_addr = self.user_directory.get(requester)
-        if requester_addr:
-            self.send_client_response(requester_addr, f"CHAT_ACCEPTED:{target_user}")
-            logging.info(f"CHAT_ACCEPTED sent to client: {requester}")
+            # Update states to CONNECTING
+            if requester in self.connection_states:
+                self.connection_states[requester] = ChatState.CONNECTING
+            if target_user in self.connection_states:
+                self.connection_states[target_user] = ChatState.CONNECTING
 
-        # Optionally send an ACK
-        ack = SIMPDatagram(
-            datagram_type=SIMPDatagram.TYPE_CONTROL,
-            operation=SIMPDatagram.OP_ACK,
-            sequence=datagram.sequence + 1,
-            user=requester,
-            payload=target_user
-        )
-        self.daemon_socket.sendto(ack.serialize(), addr)
-        logging.info(f"ACK sent for chat: {requester} -> {target_user}")
-        # Update connection state to CONNECTED?
-        logging.info(f"Connection established: {requester} -> {target_user}")
+            logger.info(f"Updated connection states for {requester} and {target_user} to CONNECTING")
+
+            # Notify the requester client
+            requester_addr = self.user_directory.get(requester)
+            if requester_addr:
+                notify_datagram = SIMPDatagram(
+                    datagram_type=SIMPDatagram.TYPE_CONTROL,
+                    operation=SIMPDatagram.OP_SYN_ACK,
+                    sequence=datagram.sequence,
+                    user=target_user,
+                    payload=requester
+                )
+                self.client_socket.sendto(notify_datagram.serialize(), requester_addr)
+
+            # Send ACK to complete handshake
+            ack = SIMPDatagram(
+                datagram_type=SIMPDatagram.TYPE_CONTROL,
+                operation=SIMPDatagram.OP_ACK,
+                sequence=datagram.sequence + 1,
+                user=requester,
+                payload=target_user
+            )
+            self.daemon_socket.sendto(ack.serialize(), addr)
+            logger.info(f"ACK sent for chat: {requester} -> {target_user}")
+
+        except Exception as e:
+            logger.error(f"Error handling SYN-ACK: {e}")
+            self.send_error_response(addr, "Failed to process SYN-ACK.")
 
 
     def chat_mode(client, target_user):
@@ -361,11 +386,35 @@ class SIMPDaemon:
 
 
     def _handle_ack(self, datagram, addr):
-        """
-        Final step of connection establishment
-        """
-        requester = datagram.user
-        self.connection_states[requester] = ChatState.CONNECTED
+        """Enhanced ACK handling with proper state management."""
+        try:
+            requester = datagram.user
+            target_user = datagram.payload.strip()
+
+            # Update both users to CONNECTED state
+            if requester in self.connection_states:
+                self.connection_states[requester] = ChatState.CONNECTED
+            if target_user in self.connection_states:
+                self.connection_states[target_user] = ChatState.CONNECTED
+
+            logger.info(f"Connection established between {requester} and {target_user}")
+
+            # Notify both clients of established connection
+            for user in [requester, target_user]:
+                if user in self.user_directory:
+                    notify_datagram = SIMPDatagram(
+                        datagram_type=SIMPDatagram.TYPE_CONTROL,
+                        operation=SIMPDatagram.OP_ACK,
+                        sequence=datagram.sequence,
+                        user=user,
+                        payload=f"CHAT_ESTABLISHED:{requester if user == target_user else target_user}"
+                    )
+                    self.client_socket.sendto(notify_datagram.serialize(), self.user_directory[user])
+
+        except Exception as e:
+            logger.error(f"Error handling ACK: {e}")
+            self.send_error_response(addr, "Failed to process ACK.")
+            
 
 
     def _handle_fin(self, datagram, addr):
@@ -400,7 +449,24 @@ class SIMPDaemon:
         """Handle incoming chat messages and forward them to the recipient."""
         try:
             sender = datagram.user
-            if sender not in self.connection_states or self.connection_states[sender] != ChatState.CONNECTED:
+            
+            # Check both local and peer connections
+            if sender not in self.connection_states:
+                # Try to find the sender in peer connections
+                for peer_ip, peer_port in self.peers:
+                    try:
+                        forward_datagram = SIMPDatagram(
+                            datagram_type=SIMPDatagram.TYPE_CHAT,
+                            operation=0,
+                            sequence=0,
+                            user=sender,
+                            payload=datagram.payload
+                        )
+                        self.daemon_socket.sendto(forward_datagram.serialize(), (peer_ip, peer_port))
+                        return
+                    except Exception as e:
+                        logger.error(f"Error forwarding to peer {peer_ip}:{peer_port}: {e}")
+                
                 self.send_error_response(addr, "Not in an active chat session.")
                 return
 
@@ -490,71 +556,33 @@ class SIMPDaemon:
         )
 
         serialized = syn_datagram.serialize()
+        original_timeout = self.daemon_socket.gettimeout()
+        success = False
 
-        # Try to contact each peer
-        for peer_ip, peer_port in self.peers:
-            try:
-                logger.debug(f"Sending SYN to peer {peer_ip}:{peer_port}")
-                self.daemon_socket.sendto(serialized, (peer_ip, peer_port))
-                
-                # Wait for a response
-                self.daemon_socket.settimeout(3)  # Timeout after 3 seconds
-                response, _ = self.daemon_socket.recvfrom(4096)
-                
-                # Deserialize and handle the response
-                response_datagram = SIMPDatagram.deserialize(response)
-                if response_datagram.operation == SIMPDatagram.OP_SYN_ACK:
-                    logger.info(f"Received SYN-ACK from peer {peer_ip}:{peer_port}")
-                    return True
-            except socket.timeout:
-                logger.warning(f"Timeout waiting for SYN-ACK from {peer_ip}:{peer_port}")
-            except Exception as e:
-                logger.error(f"Error communicating with peer {peer_ip}:{peer_port}: {e}")
-
-        logger.error(f"Chat request to '{target_username}' failed: no response from peers.")
-        return False
-
-    # def handle_peer_message(self, message, addr):
-    #     """
-    #     Improved peer message handling
-    #     """
-    #     logger.info(f"Received peer message from {addr}: {message}")
-        
-    #     try:
-    #         # If message looks like a raw datagram, try to deserialize
-    #         if len(message) >= 40:  # Minimum datagram size
-    #             try:
-    #                 datagram = SIMPDatagram.deserialize(message.encode())
+        try: # Try to contact each peer
+            for peer_ip, peer_port in self.peers:
+                try:
+                    logger.debug(f"Sending SYN to peer {peer_ip}:{peer_port}")
+                    self.daemon_socket.settimeout(10)  
+                    self.daemon_socket.sendto(serialized, (peer_ip, peer_port))
                     
-    #                 # Handle different datagram types
-    #                 if datagram.type == SIMPDatagram.TYPE_CONTROL:
-    #                     self._handle_control_datagram(datagram, addr)
-    #                     return
-    #             except SIMPError:
-    #                 pass
-            
-    #         # Fallback for legacy or unexpected message formats
-    #         if len(message) == 4:  # Specific to your current issue
-    #             requester, target = message[:2], message[2:]
-    #             logger.info(f"Attempting to route message from {requester} to {target}")
-                
-    #             # Try to find addresses for users
-    #             requester_addr = self.user_directory.get(requester)
-    #             target_addr = self.user_directory.get(target)
-                
-    #             if requester_addr and target_addr:
-    #                 # Notify target about chat request
-    #                 self.send_client_response(
-    #                     target_addr, 
-    #                     f"CHAT_REQUEST:{requester}"
-    #                 )
-    #             else:
-    #                 logger.warning(f"Could not route message. Requester: {requester_addr}, Target: {target_addr}")
-    #         else:
-    #             logger.warning(f"Unrecognized peer message format: {message}")
-        
-    #     except Exception as e:
-    #         logger.error(f"Error processing peer message: {e}")
+                    # Wait for a response
+                    response, _ = self.daemon_socket.recvfrom(4096)
+                    
+                    # Deserialize and handle the response
+                    response_datagram = SIMPDatagram.deserialize(response)
+                    if response_datagram.operation == SIMPDatagram.OP_SYN_ACK:
+                        logger.info(f"Received SYN-ACK from peer {peer_ip}:{peer_port}")
+                        success = True
+                        break
+                except socket.timeout:
+                    logger.warning(f"Timeout waiting for SYN-ACK from {peer_ip}:{peer_port}")
+                    continue
+        finally:
+            self.daemon_socket.settimeout(original_timeout)
+
+        return success
+
 
 
 
@@ -592,75 +620,65 @@ class SIMPDaemon:
 
     
     def handle_client_messages(self):
+        """Handle incoming client messages with proper datagram formatting"""
         try:
-            data, addr = self.client_socket.recvfrom(1024)
-            message = data.decode('utf-8')
-            logger.info(f"Client message from {addr}: {message}")
+            data, addr = self.client_socket.recvfrom(4096)
             
-            # First try to handle as a SIMP datagram
             try:
-                if len(data) >= 39:  # Minimum datagram size
-                    datagram = SIMPDatagram.deserialize(data)
-                    if datagram.type == SIMPDatagram.TYPE_CHAT:
-                        self._handle_chat_datagram(datagram, addr)
-                        return
-                    elif datagram.type == SIMPDatagram.TYPE_CONTROL:
-                        self._handle_control_datagram(datagram, addr)
-                        return
+                datagram = SIMPDatagram.deserialize(data)
+                
+                if datagram.type == SIMPDatagram.TYPE_CONTROL:
+                    if datagram.operation == SIMPDatagram.OP_SYN:
+                        # Initial connection request
+                        response_datagram = SIMPDatagram(
+                            datagram_type=SIMPDatagram.TYPE_CONTROL,
+                            operation=SIMPDatagram.OP_ACK,
+                            sequence=0,
+                            user="SYSTEM",
+                            payload="USERNAME_REQUEST"
+                        )
+                        self.send_client_response(addr, response_datagram)
+                        
+                        # Forward chat request to appropriate daemon
+                        target_user = datagram.payload.strip()
+                        if target_user in self.user_directory:
+                            self._handle_syn_request(datagram, addr)
+                        else:
+                            # Forward to peers
+                            self.forward_chat_request_to_peers(target_user, addr)
+
+                        
+                    elif datagram.operation == SIMPDatagram.OP_USER_REGISTER:
+                        # Handle username registration
+                        username = datagram.user.strip()
+                        
+                        if username in self.user_directory:
+                            self.send_client_response(addr, "Username already exists. Please choose another.")
+                            return
+                            
+                        # Register the user
+                        self.user_directory[username] = addr
+                        self.connection_states[username] = ChatState.IDLE
+                        
+                        # Broadcast registration to peers
+                        self._broadcast_user_registration(username, addr)
+                        
+                        # Confirm registration
+                        self.send_client_response(addr, f"Successfully registered as {username}")
+                        logger.info(f"\nNew user registered: {username} at {addr}")
+                        
             except SIMPError:
-                # Not a datagram, handle as plain text
-                pass
-
-            # Handle as plain text message
-            message = data.decode('utf-8')
-            logger.info(f"Client message from {addr}: {message}")
-
-            if message.startswith("connect"):
-                if addr not in self.user_directory.values():
+                # Handle legacy plain text (though this should be phased out)
+                message = data.decode('utf-8')
+                if message.startswith("connect"):
                     self.send_client_response(addr, "USERNAME_REQUEST")
                 else:
-                    self.send_client_response(addr, "Already connected")
-
-            elif message.startswith("username"):
-                username = message.split(":")[1]
-                if username in self.user_directory:
-                    self.send_client_response(addr, "Username already taken.")
-                else:
-                    self.user_directory[username] = addr
-                    self.connection_states[username] = ChatState.IDLE
-                    self.send_client_response(addr, f"\n\nWelcome {username}!")
-
-            elif message.startswith("chat"):
-                target_user = message.split(":")[1]
-                self.handle_client_chat_request(target_user, addr)
-            
-            elif message.startswith("accept"):
-            # Find the username of the accepting client
-                accepting_user = self._find_username_by_address(addr)
-                if accepting_user and accepting_user in self.connection_states:
-                    # Update connection state
-                    self.connection_states[accepting_user] = ChatState.CONNECTED
-                    # Find the requesting user (stored in chat_partner)
-                    requester = None
-                    for user, state in self.connection_states.items():
-                        if state == ChatState.PENDING and user != accepting_user:
-                            requester = user
-                            break
+                    self.send_client_response(addr, "Unknown command")
                     
-                    if requester:
-                        # Update requester's state
-                        self.connection_states[requester] = ChatState.CONNECTED
-                        # Notify both parties
-                        self.send_client_response(addr, f"CHAT_ACCEPTED:{requester}")
-                        requester_addr = self.user_directory.get(requester)
-                        if requester_addr:
-                            self.send_client_response(requester_addr, f"CHAT_ACCEPTED:{accepting_user}")
-
-            else:
-                self.send_client_response(addr, "Unknown command")
-
         except Exception as e:
-            logger.error(f"Error handling client message: {e}")
+            logging.error(f"Error handling client message: {e}")
+
+    
 
 
     
@@ -709,6 +727,8 @@ class SIMPDaemon:
                 self._handle_syn_request(datagram, addr)
             elif datagram.operation == SIMPDatagram.OP_SYN_ACK:
                 self._handle_syn_ack(datagram, addr)
+            elif datagram.operation == SIMPDatagram.OP_USER_REGISTER:
+                self._handle_user_registration(datagram, addr)
             elif datagram.operation == SIMPDatagram.OP_ACK:
                 self._handle_ack(datagram, addr)
             elif datagram.operation == SIMPDatagram.OP_FIN:
@@ -729,12 +749,26 @@ class SIMPDaemon:
 
     
     def send_client_response(self, client_addr, message):
-        """Send response back to client"""
+        """Send properly formatted response to client"""
         try:
-            self.daemon_socket.sendto(message.encode(), client_addr)
-            logging.info(f"Message sent to client at {client_addr}: {message}")
+            # For string messages, create a proper control datagram
+            if isinstance(message, str):
+                response_datagram = SIMPDatagram(
+                    datagram_type=SIMPDatagram.TYPE_CONTROL,
+                    operation=SIMPDatagram.OP_ACK,
+                    sequence=0,
+                    user="SYSTEM",
+                    payload=message
+                )
+                self.client_socket.sendto(response_datagram.serialize(), client_addr)
+            else:
+                # For existing datagrams, just serialize and send
+                self.client_socket.sendto(message.serialize(), client_addr)
+                
+            logging.info(f"Response sent to client at {client_addr}")
+            
         except Exception as e:
-            logging.error(f"Error sending message to client: {e}")
+            logging.error(f"Error sending response to client: {e}")
     
 
     def listen_to_client(self):

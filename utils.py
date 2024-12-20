@@ -83,32 +83,27 @@ class SIMPDatagram:
         Serialize the SIMPDatagram into a binary format.
         """
         try:
-            # Ensure user field is 32 bytes (padded with null bytes)
+            # Ensure user field is exactly 32 bytes
             user_bytes = self.user.encode('ascii')[:32].ljust(32, b'\x00')
-
-            # Encode payload (max 1024 bytes)
-            payload_bytes = self.payload.encode('ascii')[:1024]
-            payload_length = len(payload_bytes)
-
-            # Pack the header (39 bytes: 1+1+4+32+1 for reserved byte)
+            
+            # Ensure payload is encoded
+            payload_bytes = self.payload.encode('ascii') if self.payload else b''
+            
+            # Pack the header (39 bytes total)
             header = struct.pack(
-                '!BBI32sB',  # Format: Type (1), Operation (1), Sequence (4), User (32), Reserved (1)
+                '!BBI32sB',
                 self.type,
                 self.operation,
                 self.sequence,
                 user_bytes,
-                0  # Reserved byte, set to 0
+                0  # Reserved byte
             )
-
-            # Log detailed serialization information
-            logger.debug(f"Serialized datagram: type={self.type}, operation={self.operation}, "
-                        f"user='{self.user}', payload_length={payload_length}")
-
-            # Combine header and payload
+            
+            # Return complete datagram
             return header + payload_bytes
         except Exception as e:
             logger.error(f"Serialization error: {e}")
-            raise SIMPError(f"Failed to serialize datagram: {e}")
+            raise SIMPError("Failed to serialize datagram")
 
     @staticmethod
     def deserialize(data):
@@ -116,24 +111,34 @@ class SIMPDatagram:
         Deserialize binary data into a SIMPDatagram object.
         """
         try:
-            if len(data) < 39:  # Ensure the data is at least 39 bytes long
+            # Check minimum length (header size)
+            if len(data) < 39:
                 raise SIMPError(f"Incomplete datagram: expected at least 39 bytes, got {len(data)}")
 
-            # Unpack the header (39 bytes: 1+1+4+32+1 for reserved byte)
-            datagram_type, operation, sequence, user_bytes, _ = struct.unpack('!BBI32sB', data[:39])
-            user = user_bytes.decode('ascii').strip('\x00')  # Remove padding
-
-            # Extract the payload (remaining bytes)
+            # Unpack header
+            header = data[:39]
+            datagram_type, operation, sequence, user_bytes, _ = struct.unpack('!BBI32sB', header)
+            
+            # Extract payload if present
             payload = data[39:].decode('ascii') if len(data) > 39 else ""
-
-            # Log deserialization details
-            logger.debug(f"Deserialized datagram: type={datagram_type}, operation={operation}, "
-                        f"sequence={sequence}, user='{user}', payload='{payload}'")
-
+            
+            # Clean up user field
+            user = user_bytes.rstrip(b'\x00').decode('ascii')
+            
             return SIMPDatagram(datagram_type, operation, sequence, user, payload)
         except Exception as e:
             logger.error(f"Deserialization error: {e}")
-            raise SIMPError(f"Failed to deserialize datagram: {e}")
+            raise SIMPError("Failed to deserialize datagram")
+
+    def __eq__(self, other):
+        """Enable comparison between datagrams"""
+        if not isinstance(other, SIMPDatagram):
+            return False
+        return (self.type == other.type and
+                self.operation == other.operation and
+                self.sequence == other.sequence and
+                self.user == other.user and
+                self.payload == other.payload)
         
     def test_serialization():
         datagram = SIMPDatagram(1, 2, 3, "client1", "Hello, client2!")
