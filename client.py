@@ -11,7 +11,7 @@ class SIMPClient:
         self.server_address = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('127.0.0.1', 0))
-        self.socket.settimeout(10)
+        self.socket.settimeout(30)
         self.username = ""
         self.in_chat = False
         self.chat_partner = None
@@ -19,7 +19,7 @@ class SIMPClient:
         self.pending_chat_requests = set()  # Tracking pending chat requests
 
 
-    def send_datagram(self, datagram_type, operation, payload=""):
+    def send_datagram(self, datagram_type, operation, payload="", timeout=5):
         """Send a properly formatted SIMP datagram."""
         try:
             self.sequence_number = (self.sequence_number + 1) % 2
@@ -35,6 +35,9 @@ class SIMPClient:
             serialized = datagram.serialize()
             self.socket.sendto(serialized, self.server_address)
             
+            # Set the timeout for the socket
+            self.socket.settimeout(timeout)
+            
             # Receive response with proper buffer size
             response, _ = self.socket.recvfrom(4096)  # Increased buffer size
             
@@ -47,7 +50,7 @@ class SIMPClient:
                     return response.decode('utf-8')
                 except UnicodeDecodeError:
                     raise SIMPError("Invalid response format")
-
+    
         except socket.timeout:
             raise TimeoutError("No response from daemon")
         except Exception as e:
@@ -100,11 +103,12 @@ class SIMPClient:
     def chat(self, target_user):
         """Initiate chat with proper three-way handshake."""
         try:
-            # Send SYN request
+            # Send SYN request with a longer timeout
             syn_response = self.send_datagram(
                 SIMPDatagram.TYPE_CONTROL,
                 SIMPDatagram.OP_SYN,
-                target_user
+                target_user,
+                timeout=10  # Increase timeout duration
             )
             
             if isinstance(syn_response, SIMPDatagram):
@@ -113,7 +117,8 @@ class SIMPClient:
                     ack_response = self.send_datagram(
                         SIMPDatagram.TYPE_CONTROL,
                         SIMPDatagram.OP_ACK,
-                        target_user
+                        target_user,
+                        timeout=10  # Increase timeout duration
                     )
                     return "CHAT_ACCEPTED:" + target_user
             return str(syn_response)
