@@ -257,30 +257,31 @@ class SIMPDaemon:
             requester = datagram.user
             target_user = datagram.payload.strip()
             logger.info(f"Handling SYN request from {requester} to {target_user}")
-
-            if target_user not in self.user_directory:
-                self.send_error_response(addr, f"User '{target_user}' not found.")
+    
+            # Verify both users exist and are in valid states
+            if requester not in self.user_directory or target_user not in self.user_directory:
+                self.send_error_response(addr, "User not found")
                 return
-
+    
             if self.connection_states.get(target_user) == ChatState.CONNECTED:
-                self.send_error_response(addr, f"User '{target_user}' is busy in another chat.")
+                self.send_error_response(addr, "User is busy")
                 return
-
-            # Update states
+    
+            # Update states properly
             self.connection_states[requester] = ChatState.SYN_SENT
             self.connection_states[target_user] = ChatState.SYN_RECEIVED
-
-            # Send chat request to target user
+    
+            # Send SYN to target
             target_addr = self.user_directory[target_user]
-            chat_request = SIMPDatagram(
+            notify_datagram = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CONTROL,
                 operation=SIMPDatagram.OP_SYN,
                 sequence=datagram.sequence,
                 user=requester,
                 payload=f"CHAT_REQUEST:{requester}"
             )
-            self.client_socket.sendto(chat_request.serialize(), target_addr)
-
+            self.client_socket.sendto(notify_datagram.serialize(), target_addr)
+    
             # Send SYN-ACK back to requester
             syn_ack = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CONTROL,
@@ -290,6 +291,7 @@ class SIMPDaemon:
                 payload=requester
             )
             self.client_socket.sendto(syn_ack.serialize(), addr)
+            
             logger.info(f"SYN-ACK sent to {addr} for chat request {requester} -> {target_user}")
         except Exception as e:
             logger.error(f"Failed to handle SYN request: {e}")
@@ -301,13 +303,15 @@ class SIMPDaemon:
         try:
             requester = datagram.user
             target_user = datagram.payload.strip()
-
+            
+            # Transition states to CONNECTING for both users
             if requester in self.connection_states:
                 self.connection_states[requester] = ChatState.CONNECTING
             if target_user in self.connection_states:
                 self.connection_states[target_user] = ChatState.CONNECTING
             logger.info(f"Updated connection states for {requester} and {target_user} to CONNECTING")
 
+            # Notify the requester about the SYN-ACK
             requester_addr = self.user_directory.get(requester)
             if requester_addr:
                 notify_datagram = SIMPDatagram(
@@ -319,6 +323,7 @@ class SIMPDaemon:
                 )
                 self.client_socket.sendto(notify_datagram.serialize(), requester_addr)
 
+            # Send ACK to the target user
             ack = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CONTROL,
                 operation=SIMPDatagram.OP_ACK,
@@ -587,21 +592,23 @@ class SIMPDaemon:
         """Handle incoming client messages with proper datagram formatting"""
         try:
             data, addr = self.client_socket.recvfrom(4096)
-            
             try:
                 datagram = SIMPDatagram.deserialize(data)
-                
                 if datagram.type == SIMPDatagram.TYPE_CONTROL:
                     if datagram.operation == SIMPDatagram.OP_SYN:
-                        # Initial connection request
-                        response_datagram = SIMPDatagram(
-                            datagram_type=SIMPDatagram.TYPE_CONTROL,
-                            operation=SIMPDatagram.OP_ACK,
-                            sequence=0,
-                            user="SYSTEM",
-                            payload="USERNAME_REQUEST"
-                        )
-                        self.send_client_response(addr, response_datagram)
+                        # Check if client is registered first
+                        requester = datagram.user.strip()
+                        if requester not in self.user_directory:
+                            response_datagram = SIMPDatagram(
+                                datagram_type=SIMPDatagram.TYPE_CONTROL,
+                                operation=SIMPDatagram.OP_ACK,
+                                sequence=0,
+                                user="SYSTEM",
+                                payload="USERNAME_REQUEST"
+                            )
+                            self.send_client_response(addr, response_datagram)
+                            logger.warning(f"Requester {requester} not found. Sent USERNAME_REQUEST to {addr}")
+                            return
                         
                         # Forward chat request to appropriate daemon
                         target_user = datagram.payload.strip()
@@ -611,7 +618,6 @@ class SIMPDaemon:
                             # Forward to peers
                             self.forward_chat_request_to_peers(target_user, addr)
 
-                        
                     elif datagram.operation == SIMPDatagram.OP_USER_REGISTER:
                         # Handle username registration
                         username = datagram.user.strip()
@@ -629,18 +635,11 @@ class SIMPDaemon:
                         
                         # Confirm registration
                         self.send_client_response(addr, f"Successfully registered as {username}")
-                        logger.info(f"\nNew user registered: {username} at {addr}")
-                        
-            except SIMPError:
-                # Handle legacy plain text (though this should be phased out)
-                message = data.decode('utf-8')
-                if message.startswith("connect"):
-                    self.send_client_response(addr, "USERNAME_REQUEST")
-                else:
-                    self.send_client_response(addr, "Unknown command")
-                    
+                        logger.info(f"New user registered: {username} at {addr}")
+            except Exception as e:
+                logger.error(f"Error processing datagram: {e}")
         except Exception as e:
-            logging.error(f"Error handling client message: {e}")
+            logger.error(f"Error receiving data: {e}")
 
     
 
@@ -834,17 +833,17 @@ def main():
             command = input("Enter command (chat, message, quit): ").strip().lower()
             if command == "chat":
                 target_user = input("Enter the username of the user to chat with: ").strip()
-                response = SIMPClient.chat(target_user) #here
+                response = SIMPClient.chat(target_user) 
                 if response:
                     print(f"Chat response: {response}")
                     if response.startswith("CHAT_ACCEPTED"):
-                        SIMPDaemon.chat_mode(client, target_user) #here twice
+                        SIMPDaemon.chat_mode(client, target_user) 
             elif command == "quit":
                 print("Exiting...")
                 break
             else:
                 print("Invalid command.")
-        SIMPClient.close() #here
+        SIMPClient.close() 
     except Exception as e:
         logger.critical(f"Daemon initialization failed: {e}")
         sys.exit(1)

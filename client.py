@@ -250,6 +250,13 @@ class SIMPClient:
             print(f"\nReceived: {message}")
             print("> ", end='', flush=True)
 
+
+
+    def close(self):
+        """Close the client socket."""
+        if hasattr(self, 'socket'):
+            self.socket.close()
+
     
 def main():
     if len(sys.argv) < 3:
