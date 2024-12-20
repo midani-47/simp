@@ -205,24 +205,32 @@ class SIMPClient:
                     if datagram.type == SIMPDatagram.TYPE_CONTROL:
                         if datagram.operation == SIMPDatagram.OP_SYN:
                             # Received chat request
+                            self.pending_chat_requests.add(datagram.user)  # Add to pending requests
                             print(f"\nChat request from {datagram.user}")
                             print("Type 'accept' to accept or 'reject' to decline")
                             print("> ", end='', flush=True)
                         elif datagram.operation == SIMPDatagram.OP_SYN_ACK:
                             # Chat request accepted
                             print(f"\nChat connection established with {datagram.user}")
+                            self.in_chat = True
+                            self.chat_partner = datagram.user
+                            print("Chat> ", end='', flush=True)
+                        elif datagram.operation == SIMPDatagram.OP_ACK:
+                            # Final handshake confirmation
+                            self.in_chat = True
+                            self.chat_partner = datagram.user
+                            print(f"\nChat session started with {datagram.user}")
                             print("Chat> ", end='', flush=True)
                         elif datagram.operation == SIMPDatagram.OP_FIN:
                             # Chat ended
+                            self.in_chat = False
+                            self.chat_partner = None
                             print(f"\nChat ended by {datagram.user}")
                             print("> ", end='', flush=True)
-                    elif datagram.type == SIMPDatagram.TYPE_CHAT:
+                    elif datagram.type == SIMPDatagram.TYPE_CHAT and self.in_chat:
                         # Regular chat message
                         print(f"\n{datagram.user}: {datagram.payload}")
-                        if self.in_chat:
-                            print("Chat> ", end='', flush=True)
-                        else:
-                            print("> ", end='', flush=True)
+                        print("Chat> ", end='', flush=True)
                     
                 except SIMPError:
                     # Fall back to string handling for backward compatibility
@@ -246,6 +254,8 @@ class SIMPClient:
         elif message.startswith("CHAT_ACCEPTED:"):
             peer = message.split(":")[1]
             print(f"\nChat established with {peer}")
+            self.in_chat = True
+            self.chat_partner = peer
             print("Chat> ", end='', flush=True)
         elif message.startswith("CHAT_REJECTED:"):
             peer = message.split(":")[1]
@@ -297,12 +307,19 @@ def main():
                         client.chat_mode(target_user)
                 
                 elif command == "accept":
-                    client.send_datagram(
-                        SIMPDatagram.TYPE_CONTROL,
-                        SIMPDatagram.OP_ACK,
-                        "accept"
-                    )
-                    print("Chat request accepted.")
+                    # We need to know who we're accepting the chat from
+                    if client.pending_chat_requests:  # Use the tracked requests
+                        requester = next(iter(client.pending_chat_requests))
+                        response = client.send_datagram(
+                            SIMPDatagram.TYPE_CONTROL,
+                            SIMPDatagram.OP_ACK,
+                            requester  # Send the username of the requester
+                        )
+                        if response:
+                            client.chat_mode(requester)  # Enter chat mode with accepted user
+                        client.pending_chat_requests.remove(requester)
+                    else:
+                        print("No pending chat requests to accept")
                 
                 elif command == "reject":
                     client.send_datagram(

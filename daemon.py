@@ -359,30 +359,42 @@ class SIMPDaemon:
 
 
     def _handle_ack(self, datagram, addr):
+        """Handle ACK messages with proper state updates"""
         try:
-            requester = datagram.user
-            target_user = datagram.payload.strip()
+            accepter = datagram.user
+            requester = datagram.payload.strip()
 
+            # Update connection states for both users
+            if accepter in self.connection_states:
+                self.connection_states[accepter] = ChatState.CONNECTED
             if requester in self.connection_states:
                 self.connection_states[requester] = ChatState.CONNECTED
-            if target_user in self.connection_states:
-                self.connection_states[target_user] = ChatState.CONNECTED
-            logger.info(f"Connection established between {requester} and {target_user}")
-
-            for user in [requester, target_user]:
-                if user in self.user_directory:
-                    notify_datagram = SIMPDatagram(
-                        datagram_type=SIMPDatagram.TYPE_CONTROL,
-                        operation=SIMPDatagram.OP_ACK,
-                        sequence=datagram.sequence,
-                        user=user,
-                        payload=f"CHAT_ESTABLISHED:{requester if user == target_user else target_user}"
-                    )
-                    self.client_socket.sendto(notify_datagram.serialize(), self.user_directory[user])
+            
+            # Notify both users about the established connection
+            if accepter in self.user_directory:
+                ack_datagram = SIMPDatagram(
+                    datagram_type=SIMPDatagram.TYPE_CONTROL,
+                    operation=SIMPDatagram.OP_ACK,
+                    sequence=datagram.sequence,
+                    user=requester,
+                    payload=""
+                )
+                self.client_socket.sendto(ack_datagram.serialize(), self.user_directory[accepter])
+            
+            if requester in self.user_directory:
+                ack_datagram = SIMPDatagram(
+                    datagram_type=SIMPDatagram.TYPE_CONTROL,
+                    operation=SIMPDatagram.OP_ACK,
+                    sequence=datagram.sequence,
+                    user=accepter,
+                    payload=""
+                )
+                self.client_socket.sendto(ack_datagram.serialize(), self.user_directory[requester])
+                
+            logger.info(f"Chat established between {accepter} and {requester}")
         except Exception as e:
             logger.error(f"Error handling ACK: {e}")
             self.send_error_response(addr, "Failed to process ACK.")
-
             
 
 
