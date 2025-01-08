@@ -178,25 +178,38 @@ class SIMPDaemon:
 
 
     def _handle_chat_message(self, datagram, addr):
-        """Handle chat messages between users."""
-        sender = datagram.user
-        
-        # Forward to all connected chat partners
-        for (user1, user2), state in self.chat_pairs.items():
-            if state == ChatState.CONNECTED and sender in (user1, user2):
-                target = user2 if sender == user1 else user1
-                if target in self.user_directory:
-                    self.client_socket.sendto(datagram.serialize(), self.user_directory[target])
-        
-        # Send acknowledgment
-        ack = SIMPDatagram(
-            datagram_type=SIMPDatagram.TYPE_CONTROL,
-            operation=SIMPDatagram.OP_ACK,
-            sequence=datagram.sequence,
-            user="SYSTEM",
-            payload=""
-        )
-        self.client_socket.sendto(ack.serialize(), addr)
+        """Handle chat messages between users with proper acknowledgment."""
+        try:
+            sender = datagram.user
+            found_chat = False
+            
+            # Find the active chat pair and forward message
+            for (user1, user2), state in self.chat_pairs.items():
+                if state == ChatState.CONNECTED and sender in (user1, user2):
+                    target = user2 if sender == user1 else user1
+                    if target in self.user_directory:
+                        # Forward message to target
+                        self.client_socket.sendto(datagram.serialize(), self.user_directory[target])
+                        found_chat = True
+                        
+                        # Send acknowledgment to sender
+                        ack = SIMPDatagram(
+                            datagram_type=SIMPDatagram.TYPE_CONTROL,
+                            operation=SIMPDatagram.OP_ACK,
+                            sequence=datagram.sequence,
+                            user="SYSTEM",
+                            payload=""
+                        )
+                        self.client_socket.sendto(ack.serialize(), addr)
+                        break
+            
+            if not found_chat:
+                logger.warning(f"No active chat found for user {sender}")
+                self.send_error_response(addr, "No active chat session")
+                
+        except Exception as e:
+            logger.error(f"Error handling chat message: {e}")
+            self.send_error_response(addr, "Failed to process chat message")
 
 
     def _handle_chat_termination(self, datagram, addr):
@@ -224,37 +237,44 @@ class SIMPDaemon:
 
 
     def _handle_chat_acceptance(self, datagram, addr):
-        """Handle chat request acceptance."""
-        accepting_user = datagram.user
-        target_user = datagram.payload.strip()
-        
-        logger.info(f"Processing chat acceptance from {accepting_user} for {target_user}")
-        
-        if target_user in self.user_directory:
-            # Update states
-            self.connection_states[accepting_user] = ChatState.CONNECTED
-            self.connection_states[target_user] = ChatState.CONNECTED
-            self.chat_pairs[(target_user, accepting_user)] = ChatState.CONNECTED
-            self.chat_pairs[(accepting_user, target_user)] = ChatState.CONNECTED
+        """Handle chat acceptance with proper state management."""
+        try:
+            accepting_user = datagram.user
+            target_user = datagram.payload.strip()
             
-            # Notify the original requester
-            accept_notify = SIMPDatagram(
-                datagram_type=SIMPDatagram.TYPE_CONTROL,
-                operation=SIMPDatagram.OP_SYN_ACK,
-                sequence=0,
-                user=accepting_user,
-                payload="CHAT_ACCEPTED"
-            )
-            self.client_socket.sendto(accept_notify.serialize(), self.user_directory[target_user])
+            if target_user in self.user_directory:
+                # Update connection states
+                self.connection_states[accepting_user] = ChatState.CONNECTED
+                self.connection_states[target_user] = ChatState.CONNECTED
+                
+                # Update chat pairs (both directions)
+                chat_key = tuple(sorted([target_user, accepting_user]))
+                self.chat_pairs[chat_key] = ChatState.CONNECTED
+                
+                # Notify both users
+                accept_notify = SIMPDatagram(
+                    datagram_type=SIMPDatagram.TYPE_CONTROL,
+                    operation=SIMPDatagram.OP_ACK,
+                    sequence=0,
+                    user=accepting_user,
+                    payload="CHAT_ACCEPTED"
+                )
+                
+                # Notify original requester
+                self.client_socket.sendto(accept_notify.serialize(), self.user_directory[target_user])
+                
+                # Confirm to accepting user
+                self.client_socket.sendto(accept_notify.serialize(), addr)
+                
+            else:
+                logger.warning(f"Target user {target_user} not found")
+                self.send_error_response(addr, f"User {target_user} not found")
+                
+        except Exception as e:
+            logger.error(f"Error handling chat acceptance: {e}")
+            self.send_error_response(addr, "Failed to process chat acceptance")
+
             
-            # Confirm to the accepting user
-            self.send_client_response(addr, SIMPDatagram(
-                datagram_type=SIMPDatagram.TYPE_CONTROL,
-                operation=SIMPDatagram.OP_ACK,
-                sequence=0,
-                user="SYSTEM",
-                payload="CHAT_ESTABLISHED"
-            ))
 
     def _handle_initial_connection(self, addr):
         """Handle initial client connection with username request."""
@@ -390,7 +410,7 @@ class SIMPDaemon:
         self.send_client_response(addr, error_datagram)
 
 
-        
+
     # def listen_to_client(self):
         # this needs fixing big time. SO FIX IT
 
