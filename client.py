@@ -45,16 +45,7 @@ class SIMPClient:
         self.waiting_for_response = False  # to add flag for stop-and-wait
 
 
-    def send_message(self, target_user, message):
-        if target_user not in self.user_directory:
-            logger.warning(f"Target user {target_user} not found in directory")
-            return
-        target_address = self.user_directory[target_user]
-        try:
-            self.client_socket.sendto(message.encode(), target_address)
-            logger.info(f"Message sent to {target_user} at {target_address}")
-        except Exception as e:
-            logger.error(f"Failed to send message to {target_user}: {e}")
+
     def send_datagram(self, datagram_type, operation, payload="", timeout=10):
         """Send a properly formatted SIMP datagram with increased timeout."""
         try:
@@ -392,7 +383,7 @@ def main(server_address, server_port):
     while True:
         try:
             if not client.in_chat:
-                command = input("\nEnter command (chat, quit, accept, reject): ").strip().lower()
+                command = input("\nEnter command (chat, quit): ").strip().lower()
 
                 if command == "chat":
                     target_user = input("Enter username to chat with: ").strip()
@@ -400,35 +391,11 @@ def main(server_address, server_port):
                     if response and "CHAT_ACCEPTED" in response:
                         client.chat_mode(target_user)
 
-                elif command == "accept":
-                    # We need to know who we're accepting the chat from
-                    if client.pending_chat_requests:  # Use the tracked requests
-                        requester = next(iter(client.pending_chat_requests))
-                        response = client.send_datagram(
-                            SIMPDatagram.TYPE_CONTROL,
-                            SIMPDatagram.OP_ACK,
-                            requester  # Send the username of the requester
-                        )
-                        if response:
-                            client.chat_mode(requester)  # Enter chat mode with accepted user
-                        client.pending_chat_requests.remove(requester)
-                    else:
-                        print("No pending chat requests to accept")
-
-                elif command == "reject":
-                    client.send_datagram(
-                        SIMPDatagram.TYPE_CONTROL,
-                        SIMPDatagram.OP_FIN,
-                        "reject"
-                    )
-                    print("Chat request rejected.")
-
                 elif command == "quit":
                     print("Exiting...")
                     break
 
             else:
-                # We're in chat mode, messages are handled in chat_mode()
                 pass
 
         except KeyboardInterrupt:
