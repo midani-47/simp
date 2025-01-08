@@ -154,7 +154,7 @@ class SIMPClient:
             return None
 
     def send_chat_message(self, message):
-        """Send a chat message and wait for acknowledgment."""
+        """Send a chat message with proper stop-and-wait implementation."""
         try:
             if not self.in_chat:
                 logger.warning("Not in chat mode")
@@ -163,7 +163,7 @@ class SIMPClient:
             # Set waiting flag
             self.waiting_for_response = True
             
-            # Send the message
+            # Create and send message datagram
             datagram = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CHAT,
                 operation=0,
@@ -171,83 +171,54 @@ class SIMPClient:
                 user=self.username,
                 payload=message
             )
-            self.socket.sendto(datagram.serialize(), self.server_address)
             
-            # Wait for acknowledgment with timeout
-            start_time = time.time()
-            while self.waiting_for_response:
-                if time.time() - start_time > 30:  # 30 second timeout
-                    logger.error("Message acknowledgment timeout")
-                    self.waiting_for_response = False
-                    return False
-                    
+            max_retries = 3
+            retry_count = 0
+            
+            while self.waiting_for_response and retry_count < max_retries:
                 try:
-                    response, _ = self.socket.recvfrom(4096)
-                    ack_datagram = SIMPDatagram.deserialize(response)
+                    # Send message
+                    self.socket.sendto(datagram.serialize(), self.server_address)
                     
-                    if (ack_datagram.type == SIMPDatagram.TYPE_CONTROL and 
-                        ack_datagram.operation == SIMPDatagram.OP_ACK):
-                        self.waiting_for_response = False
-                        self.sequence_number = (self.sequence_number + 1) % 2
-                        return True
-                        
+                    # Wait for acknowledgment with timeout
+                    start_time = time.time()
+                    while self.waiting_for_response:
+                        if time.time() - start_time > 5:  # 5 second timeout
+                            break
+                            
+                        try:
+                            response, _ = self.socket.recvfrom(4096)
+                            ack_datagram = SIMPDatagram.deserialize(response)
+                            
+                            if (ack_datagram.type == SIMPDatagram.TYPE_CONTROL and 
+                                ack_datagram.operation == SIMPDatagram.OP_ACK):
+                                self.waiting_for_response = False
+                                self.sequence_number = (self.sequence_number + 1) % 2
+                                return True
+                                
+                        except socket.timeout:
+                            continue
+                    
+                    retry_count += 1
+                    
                 except socket.timeout:
+                    retry_count += 1
                     continue
-                    
-            return False
             
+            if retry_count >= max_retries:
+                logger.error("Maximum retries exceeded for message send")
+                self.waiting_for_response = False
+                return False
+                
+            return False
+                
         except Exception as e:
             logger.error(f"Error sending chat message: {e}")
             self.waiting_for_response = False
             return False
-        
-
-    def chat_mode(self, target_user):
-        """Enhanced chat mode with synchronous messaging."""
-        self.in_chat = True
-        self.chat_partner = target_user
-        print(f"\nEntered chat mode with {target_user}")
-        print("Type 'exit' to leave chat mode")
-        
-        # Start a separate thread for receiving messages
-        receive_thread = threading.Thread(target=self._receive_chat_messages, daemon=True)
-        receive_thread.start()
-        
-        while self.in_chat:
-            try:
-                message = input("Chat> ").strip()
-                if message.lower() == 'exit':
-                    # Send FIN datagram
-                    self.send_datagram(
-                        SIMPDatagram.TYPE_CONTROL,
-                        SIMPDatagram.OP_FIN,
-                        target_user
-                    )
-                    self.in_chat = False
-                    self.chat_partner = None
-                    print("Exiting chat mode...")
-                    break
-                
-                if message:
-                    if not self.send_chat_message(message):
-                        print("Failed to send message or no acknowledgment received")
-                        if not self.in_chat:  # Check if chat was terminated
-                            break
-                    
-            except KeyboardInterrupt:
-                self.send_datagram(
-                    SIMPDatagram.TYPE_CONTROL,
-                    SIMPDatagram.OP_FIN,
-                    target_user
-                )
-                self.in_chat = False
-                self.chat_partner = None
-                print("\nChat mode terminated.")
-                break
-
 
     def _receive_chat_messages(self):
-        """Dedicated thread for receiving chat messages."""
+        """Handle incoming messages and acknowledgments."""
         while self.in_chat:
             try:
                 data, _ = self.socket.recvfrom(4096)
@@ -268,19 +239,66 @@ class SIMPClient:
                     )
                     self.socket.sendto(ack.serialize(), self.server_address)
                     
-                elif (datagram.type == SIMPDatagram.TYPE_CONTROL and 
-                      datagram.operation == SIMPDatagram.OP_FIN):
-                    print(f"\nChat ended by {datagram.user}")
-                    self.in_chat = False
-                    self.chat_partner = None
-                    break
-                    
+                elif datagram.type == SIMPDatagram.TYPE_CONTROL:
+                    if datagram.operation == SIMPDatagram.OP_FIN:
+                        print(f"\nChat ended by {datagram.user}")
+                        self.in_chat = False
+                        break
+                    elif datagram.operation == SIMPDatagram.OP_ACK:
+                        self.waiting_for_response = False
+                        
             except socket.timeout:
                 continue
             except Exception as e:
-                logger.error(f"Error in receive thread: {e}")
+                logger.error(f"Error receiving message: {e}")
                 if not self.in_chat:
                     break
+        
+
+    def chat_mode(self, target_user):
+        """Enhanced chat mode with proper two-way communication."""
+        self.in_chat = True
+        self.chat_partner = target_user
+        print(f"\nEntered chat mode with {target_user}")
+        print("Type 'exit' to leave chat mode")
+        
+        # Start message receiving thread
+        receive_thread = threading.Thread(target=self._receive_chat_messages, daemon=True)
+        receive_thread.start()
+        
+        try:
+            while self.in_chat:
+                message = input("Chat> ").strip()
+                if message.lower() == 'exit':
+                    self._send_fin_message(target_user)
+                    break
+                    
+                if message:
+                    if not self.send_chat_message(message):
+                        print("Failed to send message. Connection may be lost.")
+                        if not self.in_chat:  # Chat was terminated
+                            break
+        except KeyboardInterrupt:
+            self._send_fin_message(target_user)
+        finally:
+            self.in_chat = False
+            self.chat_partner = None
+            print("\nChat session ended.")
+    
+    def _send_fin_message(self, target_user):
+        """Send a FIN message to end the chat session."""
+        try:
+            fin_datagram = SIMPDatagram(
+                datagram_type=SIMPDatagram.TYPE_CONTROL,
+                operation=SIMPDatagram.OP_FIN,
+                sequence=0,
+                user=self.username,
+                payload=target_user
+            )
+            self.socket.sendto(fin_datagram.serialize(), self.server_address)
+        except Exception as e:
+            logger.error(f"Error sending FIN message: {e}")
+
 
     def receive_messages(self):
         while True:
