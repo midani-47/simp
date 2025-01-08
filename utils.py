@@ -162,4 +162,4 @@ class SIMPDatagram:
                 f"operation={hex(self.operation)}, "
                 f"sequence={self.sequence}, "
                 f"user='{self.user}', "
-                f"payload='{self.payload}')")
+                f"payload='{self.payload}')") 

@@ -4,6 +4,28 @@ import socket
 import threading
 from utils import SIMPDatagram, SIMPError  # Ensure this utility is correctly implemented for serialization
 import sys
+import logging
+
+
+logger = logging.getLogger()  # Root logger
+logger.setLevel(logging.DEBUG)  # Set the logging level
+
+# File handler
+file_handler = logging.FileHandler("client_debug.log", mode="w")  # Write mode
+file_handler.setLevel(logging.DEBUG)
+
+# Formatter for log messages
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+file_handler.setFormatter(formatter)
+
+# Add the file handler to the logger
+logger.addHandler(file_handler)
+
+# Optional: Also log to console for immediate feedback
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 
 class SIMPClient:
@@ -18,7 +40,16 @@ class SIMPClient:
         self.sequence_number = 0
         self.pending_chat_requests = set()  # Tracking pending chat requests
 
-
+    def send_message(self, target_user, message):
+        if target_user not in self.user_directory:
+            logger.warning(f"Target user {target_user} not found in directory")
+            return
+        target_address = self.user_directory[target_user]
+        try:
+            self.client_socket.sendto(message.encode(), target_address)
+            logger.info(f"Message sent to {target_user} at {target_address}")
+        except Exception as e:
+            logger.error(f"Failed to send message to {target_user}: {e}")
     def send_datagram(self, datagram_type, operation, payload="", timeout=10):
         """Send a properly formatted SIMP datagram with increased timeout."""
         try:
@@ -273,17 +304,13 @@ class SIMPClient:
             self.socket.close()
 
     
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: python3 client.py <host> <port>")
-        sys.exit(1)
-
-    host = sys.argv[1]
-    port = int(sys.argv[2])
+def main(server_address, server_port):
+    host = server_address
+    port = server_port
     client = SIMPClient(host, port)
 
     print(f"Connecting to daemon at {host}:{port}...")
-    
+
     # Start receive thread before connecting
     receive_thread = threading.Thread(
         target=client.receive_messages,  # Note: using instance method
@@ -299,13 +326,13 @@ def main():
         try:
             if not client.in_chat:
                 command = input("\nEnter command (chat, quit, accept, reject): ").strip().lower()
-                
+
                 if command == "chat":
                     target_user = input("Enter username to chat with: ").strip()
                     response = client.chat(target_user)  # Using instance method
                     if response and "CHAT_ACCEPTED" in response:
                         client.chat_mode(target_user)
-                
+
                 elif command == "accept":
                     # We need to know who we're accepting the chat from
                     if client.pending_chat_requests:  # Use the tracked requests
@@ -320,7 +347,7 @@ def main():
                         client.pending_chat_requests.remove(requester)
                     else:
                         print("No pending chat requests to accept")
-                
+
                 elif command == "reject":
                     client.send_datagram(
                         SIMPDatagram.TYPE_CONTROL,
@@ -328,11 +355,11 @@ def main():
                         "reject"
                     )
                     print("Chat request rejected.")
-                
+
                 elif command == "quit":
                     print("Exiting...")
                     break
-                
+
             else:
                 # We're in chat mode, messages are handled in chat_mode()
                 pass
@@ -350,4 +377,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) != 3:
+        print("Usage: python client.py <server_address> <server_port>")
+        sys.exit(1)
+
+    server_address = sys.argv[1]
+    server_port = int(sys.argv[2])
+
+    main(server_address, server_port)
