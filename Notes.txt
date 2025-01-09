@@ -1,17 +1,16 @@
+for daemons:
 python3 daemon.py 7777 7778 --peers 127.0.0.1:8889 
 python3 daemon.py 8888 8889 --peers 127.0.0.1:7778
 
+for clients:
 python3 client.py 127.0.0.1 7777
 python3 client.py 127.0.0.1 8888
 
 
 
-Current state summary:
-
 
 
 
 Next Steps:
-1. i don't see the bug reports in the client_debug.log 
-2. i don't see any difference in the wait and queue implementation. the remarks requirements are still not met 
-3. chat is still one sided despite the changes i last implemented
+1. client_debug.log 
+2. infinite loop for communication and 5 sec wait
