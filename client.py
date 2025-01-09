@@ -1,32 +1,41 @@
 #client.py
 import socket
 import threading
-from utils import SIMPDatagram, SIMPError  # Ensure this utility is correctly implemented for serialization
+from utils import SIMPDatagram, SIMPError  
 import sys
 import logging
 from queue import Queue
-import time
+# import time
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("client_debug.log", mode="w"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
-logger = logging.getLogger()  # Root logger
-logger.setLevel(logging.DEBUG)  # Set the logging level
+# logger.setLevel(logging.DEBUG)  # Set the logging level 
 
-# File handler
-file_handler = logging.FileHandler("client_debug.log", mode="w")  # Write mode
-file_handler.setLevel(logging.DEBUG)
+# # File handler
+# file_handler = logging.FileHandler("client_debug.log", mode="w")  # Write mode
+# file_handler.setLevel(logging.DEBUG)
 
-# Formatter for log messages
-formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(formatter)
+# # Formatter for log messages
+# formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+# file_handler.setFormatter(formatter)
 
-# Add the file handler to the logger
-logger.addHandler(file_handler)
+# # Add the file handler to the logger
+# logger.addHandler(file_handler)
 
-# Optional: Also log to console for immediate feedback
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+# # Optional: Also log to console for immediate feedback
+# console_handler = logging.StreamHandler()
+# console_handler.setLevel(logging.INFO)
+# console_handler.setFormatter(formatter)
+# logger.addHandler(console_handler)
 
 
 class SIMPClient:
@@ -34,19 +43,22 @@ class SIMPClient:
         self.server_address = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('127.0.0.1', 0))
-        self.socket.settimeout(30)
+        # self.socket.settimeout(30)
         self.username = ""
         self.in_chat = False
         self.chat_partner = None
+        self.message_queue = Queue()
         self.sequence_number = 0
-        self.pending_chat_requests = set()
-        self.message_queue = Queue()  # adding message Q for synchronos chat
-        self.waiting_for_response = False  # to add flag for stop-and-wait
+        self.receive_thread = None
+        self.chat_thread = None
+        # self.pending_chat_requests = set()
+        # self.message_queue = Queue()  # adding message Q for synchronos chat
+        # self.waiting_for_response = False  # to add flag for stop-and-wait
 
 
 
-    def send_datagram(self, datagram_type, operation, payload="", timeout=10):
-        """Send a properly formatted SIMP datagram with increased timeout."""
+    def send_datagram(self, datagram_type, operation, payload=""):
+        """Send a datagram and wait for response with proper error handling."""
         try:
             self.sequence_number = (self.sequence_number + 1) % 2
             datagram = SIMPDatagram(
@@ -57,61 +69,119 @@ class SIMPClient:
                 payload=payload
             )
             
-            # Send the datagram
-            serialized = datagram.serialize()
-            self.socket.sendto(serialized, self.server_address)
-            
-            # Set the timeout for the socket
-            self.socket.settimeout(timeout)
-            
-            # Receive response with proper buffer size
-            response, _ = self.socket.recvfrom(4096)  # Increased buffer size
-            
-            # Try to deserialize as datagram first
-            try:
-                return SIMPDatagram.deserialize(response)
-            except SIMPError:
-                # Fall back to string response only if deserialization fails
+            max_retries = 3
+            for attempt in range(max_retries):
                 try:
-                    return response.decode('utf-8')
-                except UnicodeDecodeError:
-                    raise SIMPError("Invalid response format")
-    
-        except socket.timeout:
-            raise TimeoutError("No response from daemon")
+                    self.socket.sendto(datagram.serialize(), self.server_address)
+                    self.socket.settimeout(5)
+                    response, _ = self.socket.recvfrom(4096)
+                    return SIMPDatagram.deserialize(response)
+                except socket.timeout:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Attempt {attempt + 1} timed out, retrying...")
+                        continue
+                    raise TimeoutError("No response from server after all retries")
+                    
         except Exception as e:
-            raise ConnectionError(f"Error during request: {e}")
+            logger.error(f"Error sending datagram: {e}")
+            raise
+
+        
+
+    def start_message_handling(self):
+        """Start the message handling thread."""
+        self.receive_thread = threading.Thread(target=self._handle_incoming_messages, daemon=True)
+        self.receive_thread.start()
+
+
+
+
+
+    def _handle_incoming_messages(self):
+        """Handle incoming messages with improved error handling."""
+        while True:
+            try:
+                self.socket.settimeout(1.0)  # Short timeout for responsive shutdown
+                data, _ = self.socket.recvfrom(4096)
+                datagram = SIMPDatagram.deserialize(data)
+                
+                if datagram.type == SIMPDatagram.TYPE_CHAT:
+                    print(f"\n{datagram.user}: {datagram.payload}")
+                    print("Chat> ", end='', flush=True)
+                    
+                    ack = SIMPDatagram(
+                        datagram_type=SIMPDatagram.TYPE_CONTROL,
+                        operation=SIMPDatagram.OP_ACK,
+                        sequence=datagram.sequence,
+                        user=self.username,
+                        payload=""
+                    )
+                    self.socket.sendto(ack.serialize(), self.server_address)
+                elif datagram.type == SIMPDatagram.TYPE_CONTROL:
+                    self._handle_control_message(datagram)
+            except socket.timeout:
+                continue
+            except Exception as e:
+                logger.error(f"Error in message handling: {e}")
+                if not self.in_chat:
+                    break
+
+
+
+
+    def _handle_control_message(self, datagram):  # operation function not defined
+        """Handle control messages with proper state management."""
+        try:
+            if datagram.operation == SIMPDatagram.OP_SYN:
+                print(f"\nChat request from {datagram.user}")
+                print("Type 'accept' to accept or 'reject' to decline")
+                self.chat_partner = datagram.user
+                
+            elif datagram.operation == SIMPDatagram.OP_SYN_ACK:
+                print(f"\nChat connection established with {datagram.user}")
+                self.in_chat = True
+                self.chat_partner = datagram.user
+                
+            elif datagram.operation == SIMPDatagram.OP_ACK:
+                if not self.in_chat:
+                    self.in_chat = True
+                    print(f"\nChat session started with {datagram.user}")
+                    
+            elif datagram.operation == SIMPDatagram.OP_FIN:
+                print(f"\nChat ended by {datagram.user}")
+                self.in_chat = False
+                self.chat_partner = None
+                
+            print("Chat> " if self.in_chat else "> ", end='', flush=True)
+            
+        except Exception as e:
+            logger.error(f"Error handling control message: {e}")
+
+
 
 
     def connect(self):
         """Establish connection with proper SIMP handshake."""
         try:
-            # Initial connection request
             response = self.send_datagram(
                 SIMPDatagram.TYPE_CONTROL,
-                SIMPDatagram.OP_SYN,
-                ""
+                SIMPDatagram.OP_SYN
             )
             
-            # Handle username request
-            if isinstance(response, (str, SIMPDatagram)):
-                # Check both string and datagram responses
-                response_text = response.payload if isinstance(response, SIMPDatagram) else response
-                
+            if isinstance(response, SIMPDatagram):
+                response_text = response.payload
                 if "USERNAME_REQUEST" in response_text:
                     while True:
                         self.username = input("Enter your username: ").strip()
                         if self.username:
-                            # Send registration request
                             reg_response = self.send_datagram(
                                 SIMPDatagram.TYPE_CONTROL,
                                 SIMPDatagram.OP_USER_REGISTER,
                                 self.username
                             )
                             
-                            # Check registration response
-                            if isinstance(reg_response, (str, SIMPDatagram)):
-                                reg_text = reg_response.payload if isinstance(reg_response, SIMPDatagram) else reg_response
+                            if isinstance(reg_response, SIMPDatagram):
+                                reg_text = reg_response.payload
                                 if "already exists" in reg_text:
                                     print(f"Username '{self.username}' already exists. Please try another.")
                                     continue
@@ -121,45 +191,42 @@ class SIMPClient:
                             print("Username cannot be empty")
                             
             return response
-        except TimeoutError:
-            print("Connection timed out.")
+        except Exception as e:
+            logger.error(f"Connection error: {e}")
             return None
 
 
-    def chat(self, target_user):
+    def chat(self, target_user):        # ack_respnose not used
         """Initiate chat with proper three-way handshake."""
         try:
-            # Send SYN request with a longer timeout
             syn_response = self.send_datagram(
                 SIMPDatagram.TYPE_CONTROL,
                 SIMPDatagram.OP_SYN,
-                target_user,
-                timeout=10  # Increase timeout duration
+                target_user
             )
             
             if isinstance(syn_response, SIMPDatagram):
                 if syn_response.operation == SIMPDatagram.OP_SYN_ACK:
-                    # Send ACK to complete handshake
                     ack_response = self.send_datagram(
                         SIMPDatagram.TYPE_CONTROL,
                         SIMPDatagram.OP_ACK,
-                        target_user,
-                        timeout=10  # Increase timeout duration
+                        target_user
                     )
+                    self.in_chat = True
+                    self.chat_partner = target_user
                     return "CHAT_ACCEPTED:" + target_user
-            return str(syn_response)
-        except TimeoutError:
-            print("Chat request timed out.")
-            return None
+                else:
+                    return syn_response.payload
+            return "Failed to establish chat connection"
+        except Exception as e:
+            logger.error(f"Chat initiation error: {e}")
+            return f"Error: {str(e)}"
+        
+        
 
     def send_chat_message(self, message):
-        """Enhanced chat message sending with better error handling."""
+        """Send chat message with improved reliability."""
         try:
-            if not self.in_chat:
-                logger.warning("Not in chat mode")
-                return False
-
-            # Create and send message datagram
             datagram = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CHAT,
                 operation=0,
@@ -168,30 +235,17 @@ class SIMPClient:
                 payload=message
             )
             
-            max_retries = 3
-            retry_count = 0
+            self.socket.sendto(datagram.serialize(), self.server_address)
+            self.socket.settimeout(5)
             
-            while retry_count < max_retries:
-                try:
-                    # Send message
-                    self.socket.sendto(datagram.serialize(), self.server_address)
-                    # Wait for acknowledgment
-                    self.socket.settimeout(5)  # 5 second timeout for ack
-                    response, _ = self.socket.recvfrom(4096)
-                    ack_datagram = SIMPDatagram.deserialize(response)
-                    
-                    if (ack_datagram.type == SIMPDatagram.TYPE_CONTROL and 
-                        ack_datagram.operation == SIMPDatagram.OP_ACK):
-                        self.sequence_number = (self.sequence_number + 1) % 2
-                        return True
-                        
-                except socket.timeout:
-                    retry_count += 1
-                    continue
-                    
-            logger.error("Maximum retries exceeded for message send")
+            response, _ = self.socket.recvfrom(4096)
+            ack = SIMPDatagram.deserialize(response)
+            
+            if ack.type == SIMPDatagram.TYPE_CONTROL and ack.operation == SIMPDatagram.OP_ACK:
+                self.sequence_number = (self.sequence_number + 1) % 2
+                return True
             return False
-                
+            
         except Exception as e:
             logger.error(f"Error sending chat message: {e}")
             return False
@@ -238,66 +292,47 @@ class SIMPClient:
         
 
     def chat_mode(self, target_user):
-        """Enhanced chat mode with proper bidirectional communication."""
-        self.in_chat = True
-        self.chat_partner = target_user
-        print(f"\nEntered chat mode with {target_user}")
-        print("Type 'exit' to leave chat mode")
-        
-        # Start message receiving thread
-        receive_thread = threading.Thread(target=self._receive_chat_messages, daemon=True)
-        receive_thread.start()
-        
+        """Improved chat mode with better state management."""
         try:
             while self.in_chat:
                 message = input("Chat> ").strip()
                 
                 if message.lower() == 'exit':
-                    # Send FIN message
-                    fin_datagram = SIMPDatagram(
-                        datagram_type=SIMPDatagram.TYPE_CONTROL,
-                        operation=SIMPDatagram.OP_FIN,
-                        sequence=self.sequence_number,
-                        user=self.username,
-                        payload=target_user
+                    self.send_datagram(
+                        SIMPDatagram.TYPE_CONTROL,
+                        SIMPDatagram.OP_FIN,
+                        target_user
                     )
-                    self.socket.sendto(fin_datagram.serialize(), self.server_address)
                     break
                 
                 if message:
-                    # Create and send chat message
-                    chat_datagram = SIMPDatagram(
-                        datagram_type=SIMPDatagram.TYPE_CHAT,
-                        operation=0,
-                        sequence=self.sequence_number,
-                        user=self.username,
-                        payload=message
-                    )
-                    
-                    # Implement stop-and-wait
                     max_retries = 3
-                    retry_count = 0
-                    self.waiting_for_response = True
-                    
-                    while retry_count < max_retries and self.waiting_for_response:
-                        self.socket.sendto(chat_datagram.serialize(), self.server_address)
-                        retry_count += 1
-                        time.sleep(1)  # Wait for ACK
-                        
-                    if self.waiting_for_response:
-                        print("Failed to send message - no acknowledgment received")
-                    else:
-                        self.sequence_number = (self.sequence_number + 1) % 2
-                        
+                    for attempt in range(max_retries):
+                        try:
+                            success = self.send_chat_message(message)
+                            if success:
+                                break
+                        except Exception as e:
+                            if attempt == max_retries - 1:
+                                logger.error(f"Failed to send message after {max_retries} attempts")
+                                print("Failed to send message. Please try again.")
+                            
         except KeyboardInterrupt:
-            self._send_fin_message(target_user)
+            self.send_datagram(
+                SIMPDatagram.TYPE_CONTROL,
+                SIMPDatagram.OP_FIN,
+                target_user
+            )
         finally:
             self.in_chat = False
             self.chat_partner = None
             print("\nChat session ended.")
 
 
-    def receive_messages(self):
+
+
+
+    def receive_messages(self):         # pending_chat_requests not defined
         while True:
             try:
                 self.socket.settimeout(5)
@@ -347,7 +382,7 @@ class SIMPClient:
                 print(f"Error in message receiving: {e}")
                 break
 
-    def _handle_legacy_message(self, message):
+    def _handle_legacy_message(self, message):          # pending_chat_requests not defined, and statswith not defined
         """Handle legacy string messages for backward compatibility."""
         if message.startswith("CHAT_REQUEST:"):
             requester = message.split(":")[1]
@@ -383,35 +418,27 @@ def main(server_address, server_port):
     client = SIMPClient(host, port)
 
     print(f"Connecting to daemon at {host}:{port}...")
+    
+    # Start message handling thread
+    client.start_message_handling()
 
-    # Start receive thread before connecting
-    receive_thread = threading.Thread(
-        target=client.receive_messages,  # Note: using instance method
-        daemon=True
-    )
-    receive_thread.start()
-
+    # Connect to server
     if not client.connect():
         print("Failed to connect to daemon.")
         sys.exit(1)
 
     while True:
         try:
-            if not client.in_chat:
-                command = input("\nEnter command (chat, quit): ").strip().lower()
+            command = input("\nEnter command (chat, quit): ").strip().lower()
 
-                if command == "chat":
-                    target_user = input("Enter username to chat with: ").strip()
-                    response = client.chat(target_user)  # Using instance method
-                    if response and "CHAT_ACCEPTED" in response:
-                        client.chat_mode(target_user)
-
-                elif command == "quit":
-                    print("Exiting...")
-                    break
-
-            else:
-                pass
+            if command == "chat":
+                target_user = input("Enter username to chat with: ").strip()
+                response = client.chat(target_user)
+                if response and "CHAT_ACCEPTED" in response:
+                    client.chat_mode(target_user)
+            elif command == "quit":
+                print("Exiting...")
+                break
 
         except KeyboardInterrupt:
             print("\nExiting...")
@@ -423,7 +450,6 @@ def main(server_address, server_port):
                 client.chat_partner = None
 
     client.socket.close()
-
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
