@@ -1,67 +1,165 @@
+#utils.py
 import struct
+import logging
 
-def serialize_header(datagram_type, operation, sequence, user, payload_length):
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Detailed logging for debugging
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        logging.FileHandler('daemon_debug.log')  # Log to file for persistent debugging
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class SIMPError(Exception):
+    """Custom exception for SIMP protocol errors."""
+    pass
+
+def validate_ascii(text, max_length):
     """
-    Serializes the SIMP header.
+    Validate and prepare text for ASCII encoding.
+    
     Args:
-        datagram_type (int): Type of the datagram (1 byte).
-        operation (int): Operation code (1 byte).
-        sequence (int): Sequence number (1 byte).
-        user (str): Username (32 bytes, ASCII encoded).
-        payload_length (int): Length of the payload (4 bytes).
-
+        text (str): Input text to validate
+        max_length (int): Maximum allowed length
+    
     Returns:
-        bytes: Serialized header.
+        str: Validated and truncated text
+    
+    Raises:
+        SIMPError: If text contains non-ASCII characters
     """
-    if len(user) > 32:
-        raise ValueError("Username must be at most 32 characters long.")
+    try:
+        # Truncate to max length
+        text = text[:max_length]
+        
+        # Validate ASCII encoding
+        text.encode('ascii')
+        return text
+    except UnicodeEncodeError:
+        logger.error(f"Non-ASCII characters in input: {text}")
+        raise SIMPError(f"Input must contain only ASCII characters (max {max_length} chars)")
 
-    # Pad the username to 32 bytes
-    user_padded = user.ljust(32, '\x00').encode('ascii')
-
-    # Pack the header using struct
-    header = struct.pack('!BBB32sI', datagram_type, operation, sequence, user_padded, payload_length)
-    return header
-
-def deserialize_header(header_bytes):
+class SIMPDatagram:
     """
-    Deserializes the SIMP header.
-    Args:
-        header_bytes (bytes): Serialized header (40 bytes).
-
-    Returns:
-        dict: Dictionary with header fields.
+    Represents a datagram in the Simple IMC Messaging Protocol (SIMP)
     """
-    if len(header_bytes) != 40:
-        raise ValueError("Header must be exactly 40 bytes.")
+    # Control Datagram Types
+    TYPE_CONTROL = 0x01
+    TYPE_CHAT = 0x02
+    # Operation Codes for Control Datagrams
+    OP_ERROR = 0x01
+    OP_SYN = 0x02
+    OP_SYN_ACK = 0x03  # Added SYN_ACK explicitly
+    OP_ACK = 0x04
+    OP_FIN = 0x08
+    OP_USER_REGISTER = 0x09 
 
-    # Unpack the header using struct
-    datagram_type, operation, sequence, user_padded, payload_length = struct.unpack('!BBB32sI', header_bytes)
+    def __init__(self, datagram_type, operation, sequence, user, payload=''):
+        """
+        Initialize a SIMP Datagram
+        
+        Args:
+            datagram_type (int): Type of datagram (control or chat)
+            operation (int): Operation code
+            sequence (int): Sequence number (0 or 1)
+            user (str): Username (max 32 chars)
+            payload (str, optional): Message payload
+        """
+        self.type = datagram_type
+        self.operation = operation
+        self.sequence = sequence
+        
+        # Validate and prepare user
+        self.user = validate_ascii(user, 32)
+        
+        # Validate and prepare payload
+        self.payload = validate_ascii(payload, 1024) if payload else ''
 
-    # Decode the username and strip padding
-    user = user_padded.decode('ascii').rstrip('\x00')
+    def serialize(self):
+        """
+        Serialize the SIMPDatagram into a binary format.
+        """
+        try:
+            # Ensure user field is exactly 32 bytes
+            user_bytes = self.user.encode('ascii')[:32].ljust(32, b'\x00')
+            
+            # Ensure payload is encoded
+            payload_bytes = self.payload.encode('ascii') if self.payload else b''
+            
+            # Pack the header (39 bytes total)
+            header = struct.pack(
+                '!BBI32sB',
+                self.type,
+                self.operation,
+                self.sequence,
+                user_bytes,
+                0  # Reserved byte
+            )
+            
+            # Return complete datagram
+            return header + payload_bytes
+        except Exception as e:
+            logger.error(f"Serialization error: {e}")
+            raise SIMPError("Failed to serialize datagram")
 
-    return {
-        'type': datagram_type,
-        'operation': operation,
-        'sequence': sequence,
-        'user': user,
-        'payload_length': payload_length
-    }
+    @staticmethod
+    def deserialize(data):
+        """
+        Deserialize binary data into a SIMPDatagram object.
+        """
+        try:
+            # Check minimum length (header size)
+            if len(data) < 39:
+                raise SIMPError(f"Incomplete datagram: expected at least 39 bytes, got {len(data)}")
 
-# Example usage
-if __name__ == "__main__":
-    # Create a header
-    header = serialize_header(
-        datagram_type=0x01,
-        operation=0x02,
-        sequence=0x00,
-        user="TestUser",
-        payload_length=100
-    )
+            # Unpack header
+            header = data[:39]
+            datagram_type, operation, sequence, user_bytes, _ = struct.unpack('!BBI32sB', header)
+            
+            # Extract payload if present
+            payload = data[39:].decode('ascii') if len(data) > 39 else ""
+            
+            # Clean up user field
+            user = user_bytes.rstrip(b'\x00').decode('ascii')
+            
+            return SIMPDatagram(datagram_type, operation, sequence, user, payload)
+        except Exception as e:
+            logger.error(f"Deserialization error: {e}")
+            raise SIMPError("Failed to deserialize datagram")
 
-    print("Serialized Header:", header)
+    def __eq__(self, other):
+        """Enable comparison between datagrams"""
+        if not isinstance(other, SIMPDatagram):
+            return False
+        return (self.type == other.type and
+                self.operation == other.operation and
+                self.sequence == other.sequence and
+                self.user == other.user and
+                self.payload == other.payload)
+        
+    def test_serialization():
+        datagram = SIMPDatagram(1, 2, 3, "client1", "Hello, client2!")
+        serialized = datagram.serialize()
+        deserialized = SIMPDatagram.deserialize(serialized)
 
-    # Deserialize the header
-    parsed_header = deserialize_header(header)
-    print("Parsed Header:", parsed_header)
+        assert datagram.type == deserialized.type
+        assert datagram.operation == deserialized.operation
+        assert datagram.sequence == deserialized.sequence
+        assert datagram.user == deserialized.user
+        assert datagram.payload == deserialized.payload
+
+        logger.info("Serialization/Deserialization test passed.")
+
+
+    def __repr__(self):
+        """
+        String representation for debugging
+        """
+        return (f"SIMPDatagram(type={hex(self.type)}, "
+                f"operation={hex(self.operation)}, "
+                f"sequence={self.sequence}, "
+                f"user='{self.user}', "
+                f"payload='{self.payload}')") 
