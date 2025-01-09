@@ -10,7 +10,7 @@ import errno
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler('daemon_debug.log')
