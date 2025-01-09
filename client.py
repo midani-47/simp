@@ -10,49 +10,26 @@ import os
 
 
 def setup_logging(name):
-    # Ensure logs directory exists
     os.makedirs('logs', exist_ok=True)
-    
-    # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    
-    # Clear any existing handlers
     if logger.handlers:
         logger.handlers.clear()
-    
-    # Create file handler
     fh = logging.FileHandler(os.path.join('logs', 'client_debug.log'))
     fh.setLevel(logging.DEBUG)
-    
-    # Create console handler
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    
-    # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     fh.setFormatter(formatter)
     ch.setFormatter(formatter)
-    
-    # Add handlers
     logger.addHandler(fh)
     logger.addHandler(ch)
     
     return logger
 
-# Use at global scope
 logger = setup_logging('main')
 
 
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(levelname)s - %(message)s',
-#     handlers=[
-#         logging.StreamHandler(),
-#         logging.FileHandler('client_debut.log')
-#     ]
-# )
-# logger = logging.getLogger(__name__)
 
 class SIMPClient:
     def __init__(self, host, port):
@@ -63,15 +40,13 @@ class SIMPClient:
         self.in_chat = False
         self.chat_partner = None
         self.sequence_number = 0
-        # self.receive_thread = None
+        self.receive_thread = None
         self.message_queue = Queue()
         self.waiting_for_response = False
         self.last_message = None
         self.max_retries = 3
         self.timeout = 5.0
-        # self.pending_chat_requests = set()
-        # self.message_queue = Queue()  # adding message Q for synchronos chat
-        # self.waiting_for_response = False  # to add flag for stop-and-wait
+        
 
 
     def send_datagram_with_retry(self, datagram_type, operation, payload=""):
@@ -199,7 +174,7 @@ class SIMPClient:
 
 
 
-    def _handle_control_message(self, datagram):  # operation function not defined
+    def _handle_control_message(self, datagram):  
         """Handle control messages with proper state management."""
         try:
             if datagram.operation == SIMPDatagram.OP_SYN:
@@ -351,7 +326,7 @@ class SIMPClient:
             
             # Implementation of stop-and-wait ARQ
             max_retries = 3
-            timeout = 2.0  # 2 second timeout
+            timeout = 5.0  # 2 second timeout
             
             for attempt in range(max_retries):
                 try:
@@ -487,7 +462,7 @@ class SIMPClient:
 
 
 
-    def receive_messages(self):         # pending_chat_requests not defined
+    def receive_messages(self):    
         while True:
             try:
                 self.socket.settimeout(5)
@@ -537,7 +512,7 @@ class SIMPClient:
                 print(f"Error in message receiving: {e}")
                 break
 
-    def _handle_legacy_message(self, message):          # pending_chat_requests not defined, and statswith not defined
+    def _handle_legacy_message(self, message):         
         """Handle legacy string messages for backward compatibility."""
         if message.startswith("CHAT_REQUEST:"):
             requester = message.split(":")[1]

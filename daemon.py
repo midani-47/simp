@@ -1,12 +1,10 @@
 ## daemon.py
 import socket
-import threading
 import logging
 import select
-from queue import Queue
-from utils import SIMPDatagram, SIMPError
+from utils import SIMPDatagram
+from client import SIMPClient
 import sys
-import errno
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -152,9 +150,6 @@ class SIMPDaemon:
             self.send_error_response(addr, "Failed to process chat request")
 
 
-
-
-
     
     def handle_client_messages(self):
         """Handle incoming client messages with proper datagram formatting"""
@@ -227,21 +222,18 @@ class SIMPDaemon:
 
 
 
-    def _handle_chat_acceptance(self, datagram, addr):          #payload is not defined/reachable
+    def _handle_chat_acceptance(self, datagram, addr):   
         """Enhanced chat acceptance with proper state management."""
         try:
             accepting_user = datagram.user
             target_user = datagram.payload.strip()
-            
             # Create chat pair with consistent ordering
             chat_pair = tuple(sorted([accepting_user, target_user]))
-            
             if target_user in self.user_directory:
                 # Update states for both users
                 self.connection_states[accepting_user] = ChatState.CONNECTED
                 self.connection_states[target_user] = ChatState.CONNECTED
                 self.chat_pairs[chat_pair] = ChatState.CONNECTED
-                
                 # Send ACK to both users
                 ack = SIMPDatagram(
                     datagram_type=SIMPDatagram.TYPE_CONTROL,
@@ -250,7 +242,6 @@ class SIMPDaemon:
                     user=accepting_user,
                     payload=target_user
                 )
-                
                 self.client_socket.sendto(ack.serialize(), addr)
                 self.client_socket.sendto(ack.serialize(), self.user_directory[target_user])
                 
@@ -258,7 +249,6 @@ class SIMPDaemon:
             else:
                 logger.warning(f"Target user {target_user} not found")
                 self.send_error_response(addr, f"User {target_user} not found")
-                
         except Exception as e:
             logger.error(f"Error in chat acceptance: {e}")
             self.send_error_response(addr, "Failed to establish chat connection")
@@ -272,13 +262,10 @@ class SIMPDaemon:
         target_user = datagram.payload.strip()
         
         if target_user in self.user_directory:
-            # Reset states
             self.connection_states[terminating_user] = ChatState.IDLE
             self.connection_states[target_user] = ChatState.IDLE
             self.chat_pairs.pop((terminating_user, target_user), None)
             self.chat_pairs.pop((target_user, terminating_user), None)
-            
-            # Notify the other user
             fin_notify = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CONTROL,
                 operation=SIMPDatagram.OP_FIN,
@@ -448,10 +435,6 @@ class SIMPDaemon:
 
 
 
-    # def listen_to_client(self):
-        # this needs fixing big time. SO FIX IT
-
-
    
 def main():
     try:
@@ -469,7 +452,7 @@ def main():
             command = input("Enter command (chat, message, quit): ").strip().lower()
             if command == "chat":
                 target_user = input("Enter the username of the user to chat with: ").strip()
-                daemon.chat_mode(target_user)  # Call the correct chat_mode
+                SIMPClient.chat_mode(target_user) 
             elif command == "quit":
                 print("Exiting...")
                 break
