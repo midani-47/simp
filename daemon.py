@@ -106,45 +106,50 @@ class SIMPDaemon:
 
 
     def _handle_syn_request(self, datagram, addr):
-        """Handle chat initiation request with bidirectional setup."""
-        requester = datagram.user
-        target_user = datagram.payload.strip()
-        logger.info(f"Handling SYN request from {requester} to {target_user}")
-
-        if target_user not in self.user_directory:
-            self.send_error_response(addr, f"User {target_user} not found")
-            return
-
-        target_addr = self.user_directory[target_user]
-        
-        # Create chat pair with consistent ordering
-        chat_pair = tuple(sorted([requester, target_user]))
-        
-        # Update states for both users
-        self.connection_states[requester] = ChatState.SYN_SENT
-        self.connection_states[target_user] = ChatState.SYN_RECEIVED
-        self.chat_pairs[chat_pair] = ChatState.PENDING
-        
-        # Forward SYN to target user
-        syn_forward = SIMPDatagram(
-            datagram_type=SIMPDatagram.TYPE_CONTROL,
-            operation=SIMPDatagram.OP_SYN,
-            sequence=0,
-            user=requester,
-            payload=target_user
-        )
-        self.client_socket.sendto(syn_forward.serialize(), target_addr)
-        
-        # Send SYN-ACK to both users
-        syn_ack = SIMPDatagram(
-            datagram_type=SIMPDatagram.TYPE_CONTROL,
-            operation=SIMPDatagram.OP_SYN_ACK,
-            sequence=0,
-            user=target_user,
-            payload=requester
-        )
-        self.client_socket.sendto(syn_ack.serialize(), addr)
-        self.client_socket.sendto(syn_ack.serialize(), target_addr)
+        """Handle chat initiation with better state management."""
+        try:
+            requester = datagram.user
+            target_user = datagram.payload.strip()
+            
+            if not target_user:
+                self.send_error_response(addr, "Invalid target user")
+                return
+                
+            if target_user not in self.user_directory:
+                self.send_error_response(addr, f"User {target_user} not found")
+                return
+                
+            # Create chat pair with consistent ordering
+            chat_pair = tuple(sorted([requester, target_user]))
+            
+            # Update states
+            self.connection_states[requester] = ChatState.SYN_SENT
+            self.connection_states[target_user] = ChatState.SYN_RECEIVED
+            self.chat_pairs[chat_pair] = ChatState.CONNECTING
+            
+            # Send SYN-ACK to requester
+            syn_ack = SIMPDatagram(
+                datagram_type=SIMPDatagram.TYPE_CONTROL,
+                operation=SIMPDatagram.OP_SYN_ACK,
+                sequence=0,
+                user=target_user,
+                payload=requester
+            )
+            self.client_socket.sendto(syn_ack.serialize(), addr)
+            
+            # Forward SYN to target
+            syn_forward = SIMPDatagram(
+                datagram_type=SIMPDatagram.TYPE_CONTROL,
+                operation=SIMPDatagram.OP_SYN,
+                sequence=0,
+                user=requester,
+                payload=target_user
+            )
+            self.client_socket.sendto(syn_forward.serialize(), self.user_directory[target_user])
+            
+        except Exception as e:
+            logger.error(f"Error handling SYN request: {e}")
+            self.send_error_response(addr, "Failed to process chat request")
 
 
 
@@ -183,17 +188,17 @@ class SIMPDaemon:
 
 
     def _handle_chat_message(self, datagram, addr):
-        """Enhanced chat message handling with proper forwarding."""
+        """Handle chat message with improved state management."""
         try:
             sender = datagram.user
             
-            # Find the chat pair and target user
+            # Find the active chat pair
             target_user = None
             for (user1, user2), state in self.chat_pairs.items():
                 if state == ChatState.CONNECTED and sender in (user1, user2):
                     target_user = user2 if sender == user1 else user1
                     break
-            
+
             if target_user and target_user in self.user_directory:
                 # Forward message to target user
                 target_addr = self.user_directory[target_user]
@@ -205,11 +210,11 @@ class SIMPDaemon:
                     operation=SIMPDatagram.OP_ACK,
                     sequence=datagram.sequence,
                     user="SYSTEM",
-                    payload=""
+                    payload=target_user
                 )
                 self.client_socket.sendto(ack.serialize(), addr)
-                
                 logger.debug(f"Message forwarded from {sender} to {target_user}")
+                
             else:
                 logger.warning(f"No active chat found for user {sender}")
                 self.send_error_response(addr, "No active chat session")
@@ -222,7 +227,7 @@ class SIMPDaemon:
 
 
 
-    def _handle_chat_acceptance(self, datagram, addr):
+    def _handle_chat_acceptance(self, datagram, addr):          #payload is not defined/reachable
         """Enhanced chat acceptance with proper state management."""
         try:
             accepting_user = datagram.user
