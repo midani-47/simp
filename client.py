@@ -153,15 +153,12 @@ class SIMPClient:
             return None
 
     def send_chat_message(self, message):
-        """Send a chat message with proper stop-and-wait implementation."""
+        """Enhanced chat message sending with better error handling."""
         try:
             if not self.in_chat:
                 logger.warning("Not in chat mode")
                 return False
 
-            # Set waiting flag
-            self.waiting_for_response = True
-            
             # Create and send message datagram
             datagram = SIMPDatagram(
                 datagram_type=SIMPDatagram.TYPE_CHAT,
@@ -174,52 +171,37 @@ class SIMPClient:
             max_retries = 3
             retry_count = 0
             
-            while self.waiting_for_response and retry_count < max_retries:
+            while retry_count < max_retries:
                 try:
                     # Send message
                     self.socket.sendto(datagram.serialize(), self.server_address)
+                    # Wait for acknowledgment
+                    self.socket.settimeout(5)  # 5 second timeout for ack
+                    response, _ = self.socket.recvfrom(4096)
+                    ack_datagram = SIMPDatagram.deserialize(response)
                     
-                    # Wait for acknowledgment with timeout
-                    start_time = time.time()
-                    while self.waiting_for_response:
-                        if time.time() - start_time > 5:  # 5 second timeout
-                            break
-                            
-                        try:
-                            response, _ = self.socket.recvfrom(4096)
-                            ack_datagram = SIMPDatagram.deserialize(response)
-                            
-                            if (ack_datagram.type == SIMPDatagram.TYPE_CONTROL and 
-                                ack_datagram.operation == SIMPDatagram.OP_ACK):
-                                self.waiting_for_response = False
-                                self.sequence_number = (self.sequence_number + 1) % 2
-                                return True
-                                
-                        except socket.timeout:
-                            continue
-                    
-                    retry_count += 1
-                    
+                    if (ack_datagram.type == SIMPDatagram.TYPE_CONTROL and 
+                        ack_datagram.operation == SIMPDatagram.OP_ACK):
+                        self.sequence_number = (self.sequence_number + 1) % 2
+                        return True
+                        
                 except socket.timeout:
                     retry_count += 1
                     continue
-            
-            if retry_count >= max_retries:
-                logger.error("Maximum retries exceeded for message send")
-                self.waiting_for_response = False
-                return False
-                
+                    
+            logger.error("Maximum retries exceeded for message send")
             return False
                 
         except Exception as e:
             logger.error(f"Error sending chat message: {e}")
-            self.waiting_for_response = False
             return False
-
+        
+        
     def _receive_chat_messages(self):
-        """Enhanced message receiving with proper handling of all message types."""
+        """Enhanced message receiving with better error handling."""
         while self.in_chat:
             try:
+                self.socket.settimeout(1.0)
                 data, _ = self.socket.recvfrom(4096)
                 datagram = SIMPDatagram.deserialize(data)
                 
@@ -228,7 +210,7 @@ class SIMPClient:
                     print(f"\n{datagram.user}: {datagram.payload}")
                     print("Chat> ", end='', flush=True)
                     
-                    # Send acknowledgment
+                    # Send acknowledgment for received message
                     ack = SIMPDatagram(
                         datagram_type=SIMPDatagram.TYPE_CONTROL,
                         operation=SIMPDatagram.OP_ACK,
@@ -239,27 +221,18 @@ class SIMPClient:
                     self.socket.sendto(ack.serialize(), self.server_address)
                     
                 elif datagram.type == SIMPDatagram.TYPE_CONTROL:
-                    if datagram.operation == SIMPDatagram.OP_FIN:
+                    if datagram.operation == SIMPDatagram.OP_ACK:
+                        # Handle received ACK
+                        self.waiting_for_response = False
+                    elif datagram.operation == SIMPDatagram.OP_FIN:
                         print(f"\nChat ended by {datagram.user}")
                         self.in_chat = False
                         break
-                    elif datagram.operation == SIMPDatagram.OP_ACK:
-                        self.waiting_for_response = False
-                    elif datagram.operation == SIMPDatagram.OP_SYN_ACK:
-                        # Auto-send ACK to complete handshake
-                        ack = SIMPDatagram(
-                            datagram_type=SIMPDatagram.TYPE_CONTROL,
-                            operation=SIMPDatagram.OP_ACK,
-                            sequence=0,
-                            user=self.username,
-                            payload=datagram.user
-                        )
-                        self.socket.sendto(ack.serialize(), self.server_address)
-                        
+                
             except socket.timeout:
                 continue
             except Exception as e:
-                logger.error(f"Error receiving message: {e}")
+                logger.error(f"Error in receive_messages: {e}")
                 if not self.in_chat:
                     break
         
@@ -278,15 +251,44 @@ class SIMPClient:
         try:
             while self.in_chat:
                 message = input("Chat> ").strip()
+                
                 if message.lower() == 'exit':
-                    self._send_fin_message(target_user)
+                    # Send FIN message
+                    fin_datagram = SIMPDatagram(
+                        datagram_type=SIMPDatagram.TYPE_CONTROL,
+                        operation=SIMPDatagram.OP_FIN,
+                        sequence=self.sequence_number,
+                        user=self.username,
+                        payload=target_user
+                    )
+                    self.socket.sendto(fin_datagram.serialize(), self.server_address)
                     break
-                    
+                
                 if message:
-                    if not self.send_chat_message(message):
-                        print("Failed to send message. Connection may be lost.")
-                        if not self.in_chat:  # Chat was terminated
-                            break
+                    # Create and send chat message
+                    chat_datagram = SIMPDatagram(
+                        datagram_type=SIMPDatagram.TYPE_CHAT,
+                        operation=0,
+                        sequence=self.sequence_number,
+                        user=self.username,
+                        payload=message
+                    )
+                    
+                    # Implement stop-and-wait
+                    max_retries = 3
+                    retry_count = 0
+                    self.waiting_for_response = True
+                    
+                    while retry_count < max_retries and self.waiting_for_response:
+                        self.socket.sendto(chat_datagram.serialize(), self.server_address)
+                        retry_count += 1
+                        time.sleep(1)  # Wait for ACK
+                        
+                    if self.waiting_for_response:
+                        print("Failed to send message - no acknowledgment received")
+                    else:
+                        self.sequence_number = (self.sequence_number + 1) % 2
+                        
         except KeyboardInterrupt:
             self._send_fin_message(target_user)
         finally:
