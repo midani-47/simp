@@ -217,7 +217,7 @@ class SIMPClient:
             return False
 
     def _receive_chat_messages(self):
-        """Handle incoming messages and acknowledgments."""
+        """Enhanced message receiving with proper handling of all message types."""
         while self.in_chat:
             try:
                 data, _ = self.socket.recvfrom(4096)
@@ -245,6 +245,16 @@ class SIMPClient:
                         break
                     elif datagram.operation == SIMPDatagram.OP_ACK:
                         self.waiting_for_response = False
+                    elif datagram.operation == SIMPDatagram.OP_SYN_ACK:
+                        # Auto-send ACK to complete handshake
+                        ack = SIMPDatagram(
+                            datagram_type=SIMPDatagram.TYPE_CONTROL,
+                            operation=SIMPDatagram.OP_ACK,
+                            sequence=0,
+                            user=self.username,
+                            payload=datagram.user
+                        )
+                        self.socket.sendto(ack.serialize(), self.server_address)
                         
             except socket.timeout:
                 continue
@@ -255,7 +265,7 @@ class SIMPClient:
         
 
     def chat_mode(self, target_user):
-        """Enhanced chat mode with proper two-way communication."""
+        """Enhanced chat mode with proper bidirectional communication."""
         self.in_chat = True
         self.chat_partner = target_user
         print(f"\nEntered chat mode with {target_user}")
@@ -283,20 +293,6 @@ class SIMPClient:
             self.in_chat = False
             self.chat_partner = None
             print("\nChat session ended.")
-    
-    def _send_fin_message(self, target_user):
-        """Send a FIN message to end the chat session."""
-        try:
-            fin_datagram = SIMPDatagram(
-                datagram_type=SIMPDatagram.TYPE_CONTROL,
-                operation=SIMPDatagram.OP_FIN,
-                sequence=0,
-                user=self.username,
-                payload=target_user
-            )
-            self.socket.sendto(fin_datagram.serialize(), self.server_address)
-        except Exception as e:
-            logger.error(f"Error sending FIN message: {e}")
 
 
     def receive_messages(self):

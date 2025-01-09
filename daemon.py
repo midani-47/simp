@@ -106,7 +106,7 @@ class SIMPDaemon:
 
 
     def _handle_syn_request(self, datagram, addr):
-        """Handle chat initiation request."""
+        """Handle chat initiation request with bidirectional setup."""
         requester = datagram.user
         target_user = datagram.payload.strip()
         logger.info(f"Handling SYN request from {requester} to {target_user}")
@@ -120,30 +120,32 @@ class SIMPDaemon:
         # Create chat pair with consistent ordering
         chat_pair = tuple(sorted([requester, target_user]))
         
-        # Update states
+        # Update states for both users
         self.connection_states[requester] = ChatState.SYN_SENT
         self.connection_states[target_user] = ChatState.SYN_RECEIVED
         self.chat_pairs[chat_pair] = ChatState.PENDING
         
-        # Forward request to target user
-        request = SIMPDatagram(
+        # Forward SYN to target user
+        syn_forward = SIMPDatagram(
             datagram_type=SIMPDatagram.TYPE_CONTROL,
             operation=SIMPDatagram.OP_SYN,
             sequence=0,
             user=requester,
-            payload=target_user  # Include target user in payload
+            payload=target_user
         )
-        self.client_socket.sendto(request.serialize(), target_addr)
+        self.client_socket.sendto(syn_forward.serialize(), target_addr)
         
-        # Send SYN-ACK to requester
+        # Send SYN-ACK to both users
         syn_ack = SIMPDatagram(
             datagram_type=SIMPDatagram.TYPE_CONTROL,
             operation=SIMPDatagram.OP_SYN_ACK,
             sequence=0,
             user=target_user,
-            payload=requester  # Include requester in payload
+            payload=requester
         )
         self.client_socket.sendto(syn_ack.serialize(), addr)
+        self.client_socket.sendto(syn_ack.serialize(), target_addr)
+
 
 
 
@@ -181,12 +183,12 @@ class SIMPDaemon:
 
 
     def _handle_chat_message(self, datagram, addr):
-        """Handle chat messages with proper connection checking."""
+        """Enhanced chat message handling with bidirectional support."""
         try:
             sender = datagram.user
             found_chat = False
             
-            # Check all chat pairs
+            # Check all chat pairs with both orderings
             for chat_pair, state in self.chat_pairs.items():
                 if state == ChatState.CONNECTED and sender in chat_pair:
                     # Get the other user from the pair
@@ -202,11 +204,17 @@ class SIMPDaemon:
                             datagram_type=SIMPDatagram.TYPE_CONTROL,
                             operation=SIMPDatagram.OP_ACK,
                             sequence=datagram.sequence,
-                            user="SYSTEM",
+                            user=target,  # Set the target as the acknowledging user
                             payload=""
                         )
                         self.client_socket.sendto(ack.serialize(), addr)
                         found_chat = True
+                        
+                        # Forward to peer daemons if necessary
+                        if any(peer[1] != self.daemon_address[1] for peer in self.peers):
+                            for peer in self.peers:
+                                if peer[1] != self.daemon_address[1]:
+                                    self.daemon_socket.sendto(datagram.serialize(), peer)
                         break
             
             if not found_chat:
@@ -216,6 +224,7 @@ class SIMPDaemon:
         except Exception as e:
             logger.error(f"Error handling chat message: {e}")
             self.send_error_response(addr, "Failed to process chat message")
+
 
 
 
