@@ -117,10 +117,13 @@ class SIMPDaemon:
 
         target_addr = self.user_directory[target_user]
         
+        # Create chat pair with consistent ordering
+        chat_pair = tuple(sorted([requester, target_user]))
+        
         # Update states
         self.connection_states[requester] = ChatState.SYN_SENT
         self.connection_states[target_user] = ChatState.SYN_RECEIVED
-        self.chat_pairs[(requester, target_user)] = ChatState.PENDING
+        self.chat_pairs[chat_pair] = ChatState.PENDING
         
         # Forward request to target user
         request = SIMPDatagram(
@@ -128,7 +131,7 @@ class SIMPDaemon:
             operation=SIMPDatagram.OP_SYN,
             sequence=0,
             user=requester,
-            payload=""  # Empty payload for chat request
+            payload=target_user  # Include target user in payload
         )
         self.client_socket.sendto(request.serialize(), target_addr)
         
@@ -138,7 +141,7 @@ class SIMPDaemon:
             operation=SIMPDatagram.OP_SYN_ACK,
             sequence=0,
             user=target_user,
-            payload=""
+            payload=requester  # Include requester in payload
         )
         self.client_socket.sendto(syn_ack.serialize(), addr)
 
@@ -178,20 +181,21 @@ class SIMPDaemon:
 
 
     def _handle_chat_message(self, datagram, addr):
-        """Handle chat messages with proper forwarding and acknowledgment."""
+        """Handle chat messages with proper connection checking."""
         try:
             sender = datagram.user
             found_chat = False
             
-            # Find the active chat pair and forward message
-            for (user1, user2), state in self.chat_pairs.items():
-                if state == ChatState.CONNECTED and sender in (user1, user2):
-                    target = user2 if sender == user1 else user1
+            # Check all chat pairs
+            for chat_pair, state in self.chat_pairs.items():
+                if state == ChatState.CONNECTED and sender in chat_pair:
+                    # Get the other user from the pair
+                    target = chat_pair[1] if sender == chat_pair[0] else chat_pair[0]
+                    
                     if target in self.user_directory:
                         # Forward message to target
                         target_addr = self.user_directory[target]
                         self.client_socket.sendto(datagram.serialize(), target_addr)
-                        found_chat = True
                         
                         # Send acknowledgment to sender
                         ack = SIMPDatagram(
@@ -202,21 +206,7 @@ class SIMPDaemon:
                             payload=""
                         )
                         self.client_socket.sendto(ack.serialize(), addr)
-                        
-                        # Wait for target's acknowledgment
-                        try:
-                            self.client_socket.settimeout(5)
-                            target_ack_data, _ = self.client_socket.recvfrom(4096)
-                            target_ack = SIMPDatagram.deserialize(target_ack_data)
-                            
-                            if (target_ack.type == SIMPDatagram.TYPE_CONTROL and 
-                                target_ack.operation == SIMPDatagram.OP_ACK):
-                                # Message successfully delivered and acknowledged
-                                break
-                        except socket.timeout:
-                            logger.warning(f"No acknowledgment received from {target}")
-                        finally:
-                            self.client_socket.settimeout(None)
+                        found_chat = True
                         break
             
             if not found_chat:
@@ -227,41 +217,40 @@ class SIMPDaemon:
             logger.error(f"Error handling chat message: {e}")
             self.send_error_response(addr, "Failed to process chat message")
 
+
+
     def _handle_chat_acceptance(self, datagram, addr):
         """Handle chat acceptance with proper state management."""
-        try:
-            accepting_user = datagram.user
-            target_user = datagram.payload.strip()
+        accepting_user = datagram.user
+        target_user = datagram.payload.strip()
+        logger.info(f"Handling chat acceptance from {accepting_user} for {target_user}")
+        
+        # Create chat pair with consistent ordering
+        chat_pair = tuple(sorted([accepting_user, target_user]))
+        
+        if target_user in self.user_directory:
+            # Update connection states
+            self.connection_states[accepting_user] = ChatState.CONNECTED
+            self.connection_states[target_user] = ChatState.CONNECTED
+            self.chat_pairs[chat_pair] = ChatState.CONNECTED
             
-            if target_user in self.user_directory:
-                # Update connection states
-                self.connection_states[accepting_user] = ChatState.CONNECTED
-                self.connection_states[target_user] = ChatState.CONNECTED
-                
-                # Update chat pairs (both directions)
-                chat_key = tuple(sorted([accepting_user, target_user]))
-                self.chat_pairs[chat_key] = ChatState.CONNECTED
-                
-                # Notify both users
-                accept_notify = SIMPDatagram(
-                    datagram_type=SIMPDatagram.TYPE_CONTROL,
-                    operation=SIMPDatagram.OP_ACK,
-                    sequence=0,
-                    user=accepting_user,
-                    payload="CHAT_ACCEPTED"
-                )
-                
-                # Send to both users
-                self.client_socket.sendto(accept_notify.serialize(), self.user_directory[target_user])
-                self.client_socket.sendto(accept_notify.serialize(), addr)
-                
-            else:
-                logger.warning(f"Target user {target_user} not found")
-                self.send_error_response(addr, f"User {target_user} not found")
-                
-        except Exception as e:
-            logger.error(f"Error handling chat acceptance: {e}")
-            self.send_error_response(addr, "Failed to process chat acceptance")
+            # Send ACK to both users to confirm connection
+            ack_message = SIMPDatagram(
+                datagram_type=SIMPDatagram.TYPE_CONTROL,
+                operation=SIMPDatagram.OP_ACK,
+                sequence=0,
+                user=accepting_user,
+                payload=target_user
+            )
+            
+            # Send to both users
+            self.client_socket.sendto(ack_message.serialize(), self.user_directory[target_user])
+            self.client_socket.sendto(ack_message.serialize(), addr)
+            
+            logger.info(f"Chat connection established between {accepting_user} and {target_user}")
+        else:
+            logger.warning(f"Target user {target_user} not found")
+            self.send_error_response(addr, f"User {target_user} not found")
 
             
 
